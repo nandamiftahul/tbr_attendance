@@ -3,6 +3,79 @@
 {% block title %}Approvals · Attendance{% endblock %}
 {% block content %}
 
+{% if current_user.role == 'admin' %}
+<div class="card" style="margin-bottom:20px;">
+  <h2>Approval Flow Settings</h2>
+
+  <form method="post" action="{{ url_for('approval_route_save') }}"
+        style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+
+    <div>
+      <label>Stage</label>
+      <select name="stage" required>
+        <option value="manager">Manager</option>
+        <option value="hrd">HRD</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Department</label>
+      <select name="dept">
+        <option value="">ALL (Global)</option>
+        {% for d in departments %}
+        <option value="{{ d }}">{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label>Approver User</label>
+      <select name="approver_user_id" required>
+        {% for u in users %}
+        <option value="{{ u.id }}">
+          {{ u.name }} — {{ u.role }}{% if u.employee and u.employee.dept %} ({{ u.employee.dept }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div style="align-self:end;">
+      <button class="btn" type="submit">Save Route</button>
+    </div>
+  </form>
+
+  <hr style="margin:15px 0;">
+
+  <h3>Active Approval Routes</h3>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Stage</th>
+        <th>Department</th>
+        <th>Approver</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in routes %}
+      <tr>
+        <td>{{ r.stage|upper }}</td>
+        <td>{{ r.dept or 'ALL' }}</td>
+        <td>{{ r.approver.name }}</td>
+        <td>
+          <form method="post" action="{{ url_for('approval_route_delete', id=r.id) }}"
+                onsubmit="return confirm('Delete this route?')">
+            <button class="btn danger" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+
 <div class="card">
   <h2>Leave/Sick/WFH Approvals</h2>
   <p style="opacity:.85;margin-top:-6px;">

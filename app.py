@@ -1260,8 +1260,52 @@ def leave_approvals():
 
     # admin (atau role lain apa pun) -> fallback aman
     rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
-    return render_template("approvals.html", rows=rows)
+    departments = (
+        db.session.query(Employee.dept)
+        .filter(Employee.dept.isnot(None))
+        .distinct()
+        .order_by(Employee.dept)
+        .all()
+    )
+    departments = [d[0] for d in departments]
+    
+    users = User.query.order_by(User.name).all()
+    routes = ApprovalRoute.query.order_by(
+        ApprovalRoute.stage,
+        ApprovalRoute.dept.is_(None)
+    ).all()
+    
+    return render_template(
+        "approvals.html",
+        rows=rows,
+        departments=departments,
+        users=users,
+        routes=routes,
+    )
 
+@app.post("/approval/routes/save")
+@login_required
+@role_required("admin")
+def approval_route_save():
+    stage = request.form["stage"]
+    dept = request.form.get("dept") or None
+    uid = int(request.form["approver_user_id"])
+
+    ApprovalRoute.query.filter_by(stage=stage, dept=dept).delete()
+
+    r = ApprovalRoute(stage=stage, dept=dept, approver_user_id=uid)
+    db.session.add(r)
+    db.session.commit()
+    return redirect(url_for("leave_approvals"))
+
+@app.post("/approval/routes/<int:id>/delete")
+@login_required
+@role_required("admin")
+def approval_route_delete(id):
+    r = ApprovalRoute.query.get_or_404(id)
+    db.session.delete(r)
+    db.session.commit()
+    return redirect(url_for("leave_approvals"))
 
 @app.post("/approvals/routes/set")
 @login_required
