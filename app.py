@@ -1280,6 +1280,11 @@ def offices_admin():
     active = Office.query.filter_by(is_active=True).first()
     return render_template("office_admin.html", offices=offices, active=active)
 
+@app.get("/mobile")
+def mobile_web():
+    return render_template("mobile_app.html")
+
+
 
 if __name__ == "__main__":
     with app.app_context():
