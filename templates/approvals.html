@@ -1,3 +1,4 @@
+<!-- templates/approvals.html (REPLACE FULL) -->
 {% extends 'base.html' %}
 {% block title %}Approvals · Attendance{% endblock %}
 {% block content %}
@@ -9,16 +10,69 @@
   </p>
 </div>
 
-{% if (current_user.role or '')|lower == 'admin' %}
+<div class="card" style="margin-top:12px;">
+  <div class="tablewrap">
+    <table class="table table-fixed">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th class="col-emp">Employee</th>
+          <th class="col-type">Type</th>
+          <th class="col-dates">Dates</th>
+          <th class="col-status">Status</th>
+          <th class="col-reason">Reason</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="col-id">{{ r.id }}</td>
+
+          <td class="truncate col-emp" title="{{ r.employee.code }} — {{ r.employee.name }}">
+            {{ r.employee.code }} — {{ r.employee.name }}
+          </td>
+
+          <td class="col-type">
+            <span class="badge badge-{{ r.type }}">{{ r.type }}</span>
+          </td>
+
+          <td class="col-dates">
+            {{ r.start_date }} → {{ r.end_date }}
+          </td>
+
+          <td class="col-status">
+            <span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span>
+          </td>
+
+          <td class="truncate col-reason" title="{{ r.reason or '' }}">
+            {{ r.reason or '' }}
+          </td>
+
+          <td class="actions-cell col-actions">
+            {% if r.status in ['pending_manager','pending_hrd'] %}
+              <div class="actions-row">
+                <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
+                  <button class="btn" type="submit">✓ Approve</button>
+                </form>
+
+                <form method="post"
+                      action="{{ url_for('leave_reject', rid=r.id) }}"
+                      onsubmit="return confirm('Reject request #{{ r.id }} ({{ r.employee.code }} — {{ r.employee.name }})?');">
+                  <button class="btn btn-outline-danger" type="submit">✕ Reject</button>
+                </form>
+              </div>
+{% if current_user.role == 'admin' %}
 <div class="card" style="margin-top:12px;">
   <h2 style="margin-bottom:6px;">Approval Flow Settings</h2>
   <p style="opacity:.85;margin-top:-6px;">
-    Set who approves <b>Manager</b> per department and who approves <b>HRD</b> (global or per department).
+    Set who approves <b>Manager stage</b> per-department, and who approves <b>HRD final stage</b> (global or per-dept).
+    If manager resigns/on duty, just change approver here.
   </p>
 
   <form method="post" action="{{ url_for('approval_routes_set') }}"
         style="display:grid; grid-template-columns: 160px 1fr 1fr auto auto; gap:10px; align-items:end;">
-
     <div>
       <label>Stage</label>
       <select name="stage" required>
@@ -31,7 +85,7 @@
       <label>Department</label>
       <select name="dept">
         <option value="">(global/default)</option>
-        {% for d in (depts or []) %}
+        {% for d in depts or [] %}
           <option value="{{ d }}">{{ d }}</option>
         {% endfor %}
       </select>
@@ -40,7 +94,7 @@
     <div>
       <label>Approver User</label>
       <select name="approver_user_id" required>
-        {% for u in (users or []) %}
+        {% for u in users or [] %}
           <option value="{{ u.id }}">{{ u.name }} — {{ u.email }} ({{ u.role }})</option>
         {% endfor %}
       </select>
@@ -68,11 +122,11 @@
           </tr>
         </thead>
         <tbody>
-          {% for rr in (routes or []) %}
+          {% for rr in routes or [] %}
           <tr>
             <td>{{ rr.stage }}</td>
             <td>{{ rr.dept or '(global/default)' }}</td>
-            <td>{{ rr.approver_user_id }}</td>
+            <td>{{ rr.approver_user.name }} — {{ rr.approver_user.email }} ({{ rr.approver_user.role }})</td>
           </tr>
           {% endfor %}
           {% if not (routes or []) %}
@@ -85,53 +139,8 @@
 </div>
 {% endif %}
 
-<div class="card" style="margin-top:12px;">
-  <div class="tablewrap">
-    <table class="table table-fixed">
-      <thead>
-        <tr>
-          <th class="col-id">ID</th>
-          <th class="col-emp">Employee</th>
-          <th class="col-type">Type</th>
-          <th class="col-dates">Dates</th>
-          <th class="col-status">Status</th>
-          <th class="col-reason">Reason</th>
-          <th class="col-actions">Actions</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td class="col-id">{{ r.id }}</td>
-          <td class="truncate col-emp" title="{{ r.employee.code }} — {{ r.employee.name }}">
-            {{ r.employee.code }} — {{ r.employee.name }}
-          </td>
-          <td class="col-type">
-            <span class="badge badge-{{ r.type }}">{{ r.type }}</span>
-          </td>
-          <td class="col-dates">{{ r.start_date }} → {{ r.end_date }}</td>
-          <td class="col-status">
-            <span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span>
-          </td>
-          <td class="truncate col-reason" title="{{ r.reason or '' }}">{{ r.reason or '' }}</td>
-
-          <td class="actions-cell col-actions">
-            {% if r.status in ['pending_manager','pending_hrd'] %}
-              <div class="actions-row">
-                <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
-                  <button class="btn" type="submit">✓ Approve</button>
-                </form>
-
-                <form method="post" action="{{ url_for('leave_reject', rid=r.id) }}"
-                      onsubmit="return confirm('Reject request #{{ r.id }}?');">
-                  <button class="btn btn-outline-danger" type="submit">✕ Reject</button>
-                </form>
-              </div>
             {% else %}
-              <small style="opacity:.85;">
-                manager_by {{ r.manager_approved_by or '-' }} · hrd_by {{ r.hrd_approved_by or '-' }}
-              </small>
+              <small style="opacity:.85;">manager_by {{ r.manager_approved_by or '-' }} · hrd_by {{ r.hrd_approved_by or '-' }}</small>
             {% endif %}
           </td>
         </tr>
@@ -139,26 +148,118 @@
       </tbody>
     </table>
   </div>
+
+  <div style="opacity:.8; font-size:12px; margin-top:8px;">
+    Tip: swipe/drag the table left-right if your screen is small.
+  </div>
 </div>
 
 <style>
-.tablewrap{ width:100%; overflow-x:auto; -webkit-overflow-scrolling: touch; border-radius: 12px; }
-.table-fixed{ min-width: 1100px; }
-.table-fixed td, .table-fixed th{ vertical-align: top; white-space: nowrap; }
-.col-id{ width:60px; text-align:center; }
-.col-type{ width:95px; text-align:center; }
-.col-status{ width:110px; text-align:center; }
-.col-actions{ width:240px; }
-.col-emp{ min-width:230px; }
-.col-dates{ min-width:200px; }
-.col-reason{ min-width:260px; }
-.actions-cell{ overflow: visible !important; text-overflow: clip !important; }
-.actions-row{ display:flex; gap:10px; align-items:center; }
+/* scroll wrapper */
+.tablewrap{
+  width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+}
+
+/* ensure table wide enough so actions not clipped */
+.table-fixed{
+  min-width: 1100px;
+}
+
+/* base cell look */
+.table-fixed td, .table-fixed th{
+  vertical-align: top;
+  color: rgba(255,255,255,0.92);
+  white-space: nowrap; /* keep header/cells tidy */
+}
+.table-fixed th{
+  font-weight: 700;
+}
+
+/* column sizing (compact for ID/Type/Status) */
+.col-id{
+  width: 60px;
+  text-align: center;
+}
+.col-type{
+  width: 95px;
+  text-align: center;
+}
+.col-status{
+  width: 110px;
+  text-align: center;
+}
+.col-actions{
+  width: 240px;
+}
+.col-emp{
+  min-width: 230px;
+}
+.col-dates{
+  min-width: 200px;
+}
+.col-reason{
+  min-width: 260px;
+}
+
+/* IMPORTANT: prevent actions cell from clipping */
+.actions-cell{
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+.actions-cell *{
+  text-overflow: clip !important;
+}
+
+/* action buttons side-by-side */
+.actions-row{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
 .actions-row form{ margin:0; }
-.truncate{ overflow:hidden; text-overflow:ellipsis; max-width:380px; }
-.badge{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; background: rgba(255,255,255,0.12); }
-.btn-outline-danger{ background: transparent; border: 1px solid #ff8080; color: #ff8080; }
-.btn-outline-danger:hover{ background: #ff8080; color: #001018; }
+
+/* truncate long cells */
+.truncate{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 380px;
+}
+
+/* badges */
+.badge{
+  display:inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: rgba(255,255,255,0.12);
+}
+.badge-status.badge-pending{ background: rgba(255, 215, 0, 0.22); }
+
+.badge-status.badge-pending_manager{ background: rgba(255, 215, 0, 0.22); }
+.badge-status.badge-pending_hrd{ background: rgba(255, 215, 0, 0.22); }
+
+.badge-status.badge-approved{ background: rgba(0, 255, 170, 0.22); }
+.badge-status.badge-rejected{ background: rgba(255, 128, 128, 0.22); }
+
+.badge-leave{ background: rgba(0, 200, 255, 0.22); }
+.badge-sick{ background: rgba(255, 128, 128, 0.22); }
+.badge-wfh{ background: rgba(180, 120, 255, 0.22); }
+
+/* reject style (muted outline) */
+.btn-outline-danger{
+  background: transparent;
+  border: 1px solid #ff8080;
+  color: #ff8080;
+}
+.btn-outline-danger:hover{
+  background: #ff8080;
+  color: #001018;
+}
 </style>
 
 {% endblock %}
