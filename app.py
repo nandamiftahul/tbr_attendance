@@ -405,7 +405,9 @@ def api_leave_my():
         "end_date": str(r.end_date),
         "status": r.status,
         "reason": r.reason or "",
-        "approved_by": r.approved_by,
+        "manager_approved_by": getattr(r, "manager_approved_by", None),
+        "hrd_approved_by": getattr(r, "hrd_approved_by", None),
+        "approved_by": getattr(r, "approved_by", None),
     } for r in rows]})
 
 
