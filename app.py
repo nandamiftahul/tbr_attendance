@@ -455,7 +455,6 @@ def api_attendance_my():
         } for r in rows]
     })
 
-
 @app.route("/")
 @login_required
 def dashboard():
@@ -698,21 +697,61 @@ def attendance_check_post():
     db.session.commit()
     return redirect(url_for("attendance_check_get"))
 
-@app.get("/attendance/list")
+# --- WEB: Attendance list (FULL REPLACE) ---
+@app.get('/attendance/list')
 @login_required
 def attendance_list():
-    start = request.args.get("start")
-    end = request.args.get("end")
-    emp = request.args.get("employee")
+    start_s = (request.args.get('start') or '').strip()
+    end_s = (request.args.get('end') or '').strip()
+    emp_q = (request.args.get('employee') or '').strip()
+
+    def parse_ymd(s: str):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    tz_local = ZoneInfo(TZ)
+
+    def to_local_dt(dt):
+        """
+        If dt is naive, assume UTC then convert to local.
+        If dt has tzinfo, just convert to local.
+        """
+        if not dt:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(tz_local)
+
+    start_d = parse_ymd(start_s) if start_s else None
+    end_d = parse_ymd(end_s) if end_s else None
+
     query = Attendance.query.join(Employee)
-    if start:
-        query = query.filter(Attendance.work_date >= start)
-    if end:
-        query = query.filter(Attendance.work_date <= end)
-    if emp:
-        query = query.filter(Employee.name.ilike(f"%{emp}%"))
+
+    if start_d:
+        query = query.filter(Attendance.work_date >= start_d)
+    if end_d:
+        query = query.filter(Attendance.work_date <= end_d)
+    if emp_q:
+        query = query.filter(Employee.name.ilike(f"%{emp_q}%"))
+
     rows = query.order_by(Attendance.work_date.desc(), Employee.name.asc()).all()
-    return render_template("attendance_list.html", rows=rows, start=start, end=end, emp=emp)
+
+    # Attach pre-formatted local strings so template stays simple
+    for r in rows:
+        ci = to_local_dt(r.check_in)
+        co = to_local_dt(r.check_out)
+        r.check_in_local_str = ci.strftime("%Y-%m-%d %H:%M:%S") if ci else ""
+        r.check_out_local_str = co.strftime("%Y-%m-%d %H:%M:%S") if co else ""
+
+    return render_template(
+        'attendance_list.html',
+        rows=rows,
+        start=start_s,
+        end=end_s,
+        emp=emp_q
+    )
 
 @app.get('/attendance/export.csv')
 @login_required
