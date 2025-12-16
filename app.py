@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from sqlalchemy import or_
 
-from models import db, User, Employee, Attendance, LeaveRequest, Holiday, Shift, Office
+from models import db, User, Employee, Attendance, LeaveRequest, Holiday, Shift, Office, ApprovalRoute
 from flask import jsonify, Response
 from flask_login import login_required
 from werkzeug.security import generate_password_hash
@@ -362,6 +362,11 @@ def api_leave_request():
 
     # Determine initial status based on requester role
     req_role = (current_user.role or "staff").lower()
+
+    # Resolve configured approvers (if any). If not configured, system will fallback to role/department checks.
+    manager_assigned_to = resolve_manager_approver(emp)
+    hrd_assigned_to = resolve_hrd_approver(emp)
+
     if req_role in ("admin", "hrd"):
         init_status = "approved"
     elif req_role in ("manager", "general_manager"):
@@ -377,6 +382,8 @@ def api_leave_request():
         end_date=end_date,
         reason=reason,
         status=init_status,
+        manager_assigned_to=manager_assigned_to,
+        hrd_assigned_to=hrd_assigned_to,
     )
 
     db.session.add(r)
@@ -406,7 +413,9 @@ def api_leave_my():
         "status": r.status,
         "reason": r.reason or "",
         "manager_approved_by": getattr(r, "manager_approved_by", None),
+        "manager_assigned_to": getattr(r, "manager_assigned_to", None),
         "hrd_approved_by": getattr(r, "hrd_approved_by", None),
+        "hrd_assigned_to": getattr(r, "hrd_assigned_to", None),
         "approved_by": getattr(r, "approved_by", None),
     } for r in rows]})
 
@@ -526,7 +535,9 @@ def _leave_to_row(r: LeaveRequest):
         "employee_name": (emp.name if emp else ""),
         "dept": (emp.dept if emp else ""),
         "manager_approved_by": getattr(r, "manager_approved_by", None),
+        "manager_assigned_to": getattr(r, "manager_assigned_to", None),
         "hrd_approved_by": getattr(r, "hrd_approved_by", None),
+        "hrd_assigned_to": getattr(r, "hrd_assigned_to", None),
     }
 
 
@@ -554,45 +565,53 @@ def _my_dept():
     return (me_emp.dept if me_emp else None)
 
 
+# ---------------------------
+# Approval routing (configurable)
+# ---------------------------
+
+def _route_for(stage: str, dept: str | None):
+    stage = (stage or "").strip().lower()
+    dept = (dept or "").strip() if dept else None
+    q = ApprovalRoute.query.filter_by(stage=stage, is_active=True)
+    if dept:
+        q = q.filter(ApprovalRoute.dept == dept)
+    else:
+        q = q.filter(ApprovalRoute.dept.is_(None))
+    return q.order_by(ApprovalRoute.priority.asc(), ApprovalRoute.id.asc()).first()
+
+def resolve_manager_approver(emp: Employee):
+    # dept-specific manager approver first
+    if emp and emp.dept:
+        r = _route_for("manager", emp.dept)
+        if r:
+            return r.approver_user_id
+    # fallback: none (old logic will be used)
+    return None
+
+def resolve_hrd_approver(emp: Employee):
+    # dept-specific HRD approver first, else global HRD approver
+    if emp and emp.dept:
+        r = _route_for("hrd", emp.dept)
+        if r:
+            return r.approver_user_id
+    r = _route_for("hrd", None)
+    if r:
+        return r.approver_user_id
+    return None
+
+
+
 @app.get("/api/leave/approvals")
 @login_required
 def api_leave_approvals():
+    """Return leave requests waiting for *this user* to approve.
+    Supports configurable routing via ApprovalRoute, but remains backward compatible:
+    - If a request has manager_assigned_to/hrd_assigned_to set, only that user (or admin) can approve.
+    - If not set, fallback to old logic (role + department).
+    """
     role = (current_user.role or "staff").lower()
 
-    # Staff: tidak ada approvals (biar tab kosong)
-    if role == "staff":
-        return jsonify({"ok": True, "rows": []})
-
-    # Manager: pending_manager untuk dept dia saja
-    if role == "manager":
-        dept = _my_dept()
-        if not dept:
-            return jsonify({"ok": True, "rows": []})
-        rows = (LeaveRequest.query
-                .join(Employee)
-                .filter(Employee.dept == dept)
-                .filter(LeaveRequest.status == "pending_manager")
-                .order_by(LeaveRequest.id.desc())
-                .all())
-        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
-
-    # General Manager: pending_manager semua dept
-    if role == "general_manager":
-        rows = (LeaveRequest.query
-                .filter(LeaveRequest.status == "pending_manager")
-                .order_by(LeaveRequest.id.desc())
-                .all())
-        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
-
-    # HRD: pending_hrd saja
-    if role == "hrd":
-        rows = (LeaveRequest.query
-                .filter(LeaveRequest.status == "pending_hrd")
-                .order_by(LeaveRequest.id.desc())
-                .all())
-        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
-
-    # Admin: lihat semua yang belum final (atau semua kalau mau)
+    # Admin sees everything pending
     if role == "admin":
         rows = (LeaveRequest.query
                 .filter(LeaveRequest.status.in_(["pending_manager", "pending_hrd"]))
@@ -600,7 +619,50 @@ def api_leave_approvals():
                 .all())
         return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
 
-    return jsonify({"ok": False, "error": "Not allowed"}), 403
+    rows_out = []
+
+    # Manager-stage approvals assigned to this user
+    mgr_rows = (LeaveRequest.query
+                .filter(LeaveRequest.status == "pending_manager")
+                .filter(LeaveRequest.manager_assigned_to == current_user.id)
+                .order_by(LeaveRequest.id.desc())
+                .all())
+    rows_out.extend(mgr_rows)
+
+    # HRD-stage approvals assigned to this user
+    hrd_rows = (LeaveRequest.query
+                .filter(LeaveRequest.status == "pending_hrd")
+                .filter(LeaveRequest.hrd_assigned_to == current_user.id)
+                .order_by(LeaveRequest.id.desc())
+                .all())
+    rows_out.extend(hrd_rows)
+
+    # Backward-compatible fallback: if not assigned, use role-based rules
+    if role in ("manager", "general_manager"):
+        dept = _my_dept()
+        q = LeaveRequest.query.filter(LeaveRequest.status == "pending_manager").filter(LeaveRequest.manager_assigned_to.is_(None))
+        if role == "manager":
+            if dept:
+                q = q.join(Employee).filter(Employee.dept == dept)
+            else:
+                q = q.filter(False)
+        # general_manager: all dept
+        rows_out.extend(q.order_by(LeaveRequest.id.desc()).all())
+
+    if role == "hrd":
+        q = LeaveRequest.query.filter(LeaveRequest.status == "pending_hrd").filter(LeaveRequest.hrd_assigned_to.is_(None))
+        rows_out.extend(q.order_by(LeaveRequest.id.desc()).all())
+
+    # Deduplicate by id (because assigned + fallback could overlap)
+    seen = set()
+    uniq = []
+    for r in rows_out:
+        if r.id in seen:
+            continue
+        seen.add(r.id)
+        uniq.append(r)
+
+    return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in uniq]})
 
 
 @app.post("/api/leave/<int:rid>/approve")
@@ -613,6 +675,10 @@ def api_leave_approve(rid):
     if role in ("manager", "general_manager"):
         if r.status != "pending_manager":
             return jsonify({"ok": False, "error": "Not pending manager approval"}), 409
+
+        # If request has an assigned manager approver, only that user (or admin) can approve
+        if getattr(r, "manager_assigned_to", None) and r.manager_assigned_to != current_user.id:
+            return jsonify({"ok": False, "error": "Not assigned to you"}), 403
 
         if role == "manager":
             dept = _my_dept()
@@ -629,6 +695,10 @@ def api_leave_approve(rid):
     if role in ("hrd", "admin"):
         if r.status not in ("pending_hrd", "pending_manager"):
             return jsonify({"ok": False, "error": "Not pending HRD approval"}), 409
+
+        # If request has an assigned HRD approver, only that user (or admin) can final approve
+        if getattr(r, "hrd_assigned_to", None) and r.hrd_assigned_to != current_user.id and role != "admin":
+            return jsonify({"ok": False, "error": "Not assigned to you"}), 403
 
         r.status = "approved"
         r.hrd_approved_by = current_user.id
@@ -656,6 +726,10 @@ def api_leave_reject(rid):
     # Manager/GM: boleh reject hanya pending_manager
     elif role in ("manager", "general_manager") and r.status == "pending_manager":
         allowed = True
+        if getattr(r, 'manager_assigned_to', None) and r.manager_assigned_to != current_user.id:
+            allowed = False
+        if getattr(r, "manager_assigned_to", None) and r.manager_assigned_to != current_user.id:
+            allowed = False
         if role == "manager":
             dept = _my_dept()
             if not dept or not r.employee or r.employee.dept != dept:
@@ -664,6 +738,10 @@ def api_leave_reject(rid):
     # HRD: boleh reject hanya pending_hrd
     elif role == "hrd" and r.status == "pending_hrd":
         allowed = True
+        if getattr(r, 'hrd_assigned_to', None) and r.hrd_assigned_to != current_user.id:
+            allowed = False
+        if getattr(r, "hrd_assigned_to", None) and r.hrd_assigned_to != current_user.id:
+            allowed = False
 
     if not allowed:
         return jsonify({"ok": False, "error": "Not allowed"}), 403
@@ -1152,6 +1230,47 @@ def leave_approvals():
             rows = LeaveRequest.query.filter_by(employee_id=emp.id).order_by(LeaveRequest.created_at.desc()).all()
         return render_template("approvals.html", rows=rows)
 
+
+@app.post("/approvals/routes/set")
+@login_required
+def approval_routes_set():
+    if (current_user.role or "").lower() != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("leave_approvals"))
+
+    stage = (request.form.get("stage") or "").strip().lower()
+    dept = (request.form.get("dept") or "").strip() or None
+    approver_user_id = request.form.get("approver_user_id")
+
+    if stage not in ("manager", "hrd"):
+        flash("Invalid stage", "danger")
+        return redirect(url_for("leave_approvals"))
+
+    # allow clearing
+    if request.form.get("clear") == "1":
+        ApprovalRoute.query.filter_by(stage=stage, dept=dept).delete()
+        db.session.commit()
+        flash("Approval route cleared", "info")
+        return redirect(url_for("leave_approvals"))
+
+    try:
+        uid = int(approver_user_id)
+    except Exception:
+        flash("Approver is required", "danger")
+        return redirect(url_for("leave_approvals"))
+
+    u = User.query.get(uid)
+    if not u or not u.is_active:
+        flash("Invalid approver user", "danger")
+        return redirect(url_for("leave_approvals"))
+
+    # Upsert: remove existing for same stage+dept then insert
+    ApprovalRoute.query.filter_by(stage=stage, dept=dept).delete()
+    db.session.add(ApprovalRoute(stage=stage, dept=dept, approver_user_id=uid, is_active=True, priority=1))
+    db.session.commit()
+    flash("Approval route updated", "success")
+    return redirect(url_for("leave_approvals"))
+
     # manager: only pending_manager for their department
     if role == "manager":
         me_emp = _employee_for_user(current_user)
@@ -1178,7 +1297,13 @@ def leave_approvals():
 
     # admin: see all
     rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
-    return render_template("approvals.html", rows=rows)
+
+    # Approval flow settings data
+    depts = [r[0] for r in db.session.query(Employee.dept).filter(Employee.dept.isnot(None)).distinct().order_by(Employee.dept.asc()).all()]
+    users = User.query.filter_by(is_active=True).order_by(User.name.asc()).all()
+    routes = ApprovalRoute.query.filter_by(is_active=True).order_by(ApprovalRoute.stage.asc(), ApprovalRoute.dept.asc().nullsfirst(), ApprovalRoute.priority.asc()).all()
+
+    return render_template("approvals.html", rows=rows, depts=depts, users=users, routes=routes)
 
 
 @app.post("/leave/<int:rid>/approve")
@@ -1200,6 +1325,10 @@ def leave_approve(rid):
             flash("Request is not waiting for manager approval.", "warning")
             return redirect(url_for("leave_approvals"))
 
+        if getattr(r, 'manager_assigned_to', None) and r.manager_assigned_to != current_user.id and role != 'admin':
+            flash('Not assigned to you.', 'danger')
+            return redirect(url_for('leave_approvals'))
+
         r.status = "pending_hrd"
         r.manager_approved_by = current_user.id
         r.manager_approved_at = datetime.utcnow()
@@ -1212,6 +1341,10 @@ def leave_approve(rid):
         if r.status not in ("pending_hrd", "pending_manager"):
             flash("Request is not waiting for HRD approval.", "warning")
             return redirect(url_for("leave_approvals"))
+
+        if getattr(r, 'hrd_assigned_to', None) and r.hrd_assigned_to != current_user.id and role != 'admin':
+            flash('Not assigned to you.', 'danger')
+            return redirect(url_for('leave_approvals'))
 
         # If admin approves directly from pending_manager, treat as HRD final approve
         r.status = "approved"

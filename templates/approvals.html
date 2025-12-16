@@ -51,7 +51,7 @@
           </td>
 
           <td class="actions-cell col-actions">
-            {% if r.status == 'pending' %}
+            {% if r.status in ['pending_manager','pending_hrd'] %}
               <div class="actions-row">
                 <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
                   <button class="btn" type="submit">✓ Approve</button>
@@ -63,8 +63,84 @@
                   <button class="btn btn-outline-danger" type="submit">✕ Reject</button>
                 </form>
               </div>
+{% if current_user.role == 'admin' %}
+<div class="card" style="margin-top:12px;">
+  <h2 style="margin-bottom:6px;">Approval Flow Settings</h2>
+  <p style="opacity:.85;margin-top:-6px;">
+    Set who approves <b>Manager stage</b> per-department, and who approves <b>HRD final stage</b> (global or per-dept).
+    If manager resigns/on duty, just change approver here.
+  </p>
+
+  <form method="post" action="{{ url_for('approval_routes_set') }}"
+        style="display:grid; grid-template-columns: 160px 1fr 1fr auto auto; gap:10px; align-items:end;">
+    <div>
+      <label>Stage</label>
+      <select name="stage" required>
+        <option value="manager">manager</option>
+        <option value="hrd">hrd</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Department</label>
+      <select name="dept">
+        <option value="">(global/default)</option>
+        {% for d in depts or [] %}
+          <option value="{{ d }}">{{ d }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label>Approver User</label>
+      <select name="approver_user_id" required>
+        {% for u in users or [] %}
+          <option value="{{ u.id }}">{{ u.name }} — {{ u.email }} ({{ u.role }})</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <button class="btn" type="submit">Save</button>
+    </div>
+
+    <div>
+      <button class="btn btn-outline-danger" type="submit" name="clear" value="1"
+              onclick="return confirm('Clear route for selected stage+dept?');">Clear</button>
+    </div>
+  </form>
+
+  <div style="margin-top:12px;">
+    <div style="font-weight:700;margin-bottom:6px;">Current Routes</div>
+    <div class="tablewrap">
+      <table class="table table-fixed" style="min-width:760px;">
+        <thead>
+          <tr>
+            <th style="width:130px;">Stage</th>
+            <th style="width:220px;">Dept</th>
+            <th>Approver</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rr in routes or [] %}
+          <tr>
+            <td>{{ rr.stage }}</td>
+            <td>{{ rr.dept or '(global/default)' }}</td>
+            <td>{{ rr.approver_user.name }} — {{ rr.approver_user.email }} ({{ rr.approver_user.role }})</td>
+          </tr>
+          {% endfor %}
+          {% if not (routes or []) %}
+          <tr><td colspan="3" style="opacity:.8;">No routes set. System will fallback to old role/department logic.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
             {% else %}
-              <small style="opacity:.85;">by {{ r.approved_by or '-' }}</small>
+              <small style="opacity:.85;">manager_by {{ r.manager_approved_by or '-' }} · hrd_by {{ r.hrd_approved_by or '-' }}</small>
             {% endif %}
           </td>
         </tr>
@@ -163,6 +239,10 @@
   background: rgba(255,255,255,0.12);
 }
 .badge-status.badge-pending{ background: rgba(255, 215, 0, 0.22); }
+
+.badge-status.badge-pending_manager{ background: rgba(255, 215, 0, 0.22); }
+.badge-status.badge-pending_hrd{ background: rgba(255, 215, 0, 0.22); }
+
 .badge-status.badge-approved{ background: rgba(0, 255, 170, 0.22); }
 .badge-status.badge-rejected{ background: rgba(255, 128, 128, 0.22); }
 

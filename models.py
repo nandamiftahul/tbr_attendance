@@ -66,6 +66,25 @@ class Holiday(db.Model):
     name = db.Column(db.String(120), nullable=False)
 
 
+
+class ApprovalRoute(db.Model):
+    __tablename__ = "approval_routes"
+    id = db.Column(db.Integer, primary_key=True)
+
+    # dept-specific route. If dept is NULL => global/default
+    dept = db.Column(db.String(80), nullable=True)
+
+    # stage: manager / hrd
+    stage = db.Column(db.String(20), nullable=False)
+
+    # user who acts as approver for this stage
+    approver_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    approver_user = db.relationship("User")
+
+    is_active = db.Column(db.Boolean, default=True)
+    priority = db.Column(db.Integer, default=100)
+
+
 class LeaveRequest(db.Model):
     __tablename__ = "leave_requests"
     id = db.Column(db.Integer, primary_key=True)
@@ -82,8 +101,13 @@ class LeaveRequest(db.Model):
     # Approval trail
     manager_approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     manager_approved_at = db.Column(db.DateTime)
+
+    # Assigned approvers (resolved from ApprovalRoute when the request is created)
+    manager_assigned_to = db.Column(db.Integer, db.ForeignKey("users.id"))
     hrd_approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     hrd_approved_at = db.Column(db.DateTime)
+
+    hrd_assigned_to = db.Column(db.Integer, db.ForeignKey("users.id"))
 
     rejected_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     rejected_at = db.Column(db.DateTime)
