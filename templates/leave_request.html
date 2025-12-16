@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Leave/Sick Request · Attendance{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Leave / Sick / WFH Request</h2>
+  <form method="post" style="display:grid; grid-template-columns: repeat(5, 1fr); gap:10px;">
+    <div>
+      <label>Employee</label>
+      <select name="employee_id" required>
+        {% for e in employees %}
+        <option value="{{ e.id }}">{{ e.code }} — {{ e.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Type</label>
+      <select name="type" required>
+        <option value="leave">Leave</option>
+        <option value="sick">Sick</option>
+        <option value="wfh">WFH</option>
+      </select>
+    </div>
+    <div>
+      <label>Start</label>
+      <input type="date" name="start_date" required>
+    </div>
+    <div>
+      <label>End</label>
+      <input type="date" name="end_date" required>
+    </div>
+    <div>
+      <label>Reason</label>
+      <input name="reason" placeholder="Optional">
+    </div>
+    <div style="grid-column: 1 / -1;">
+      <button class="btn" type="submit">Submit</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

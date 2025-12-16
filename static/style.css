@@ -1,0 +1,96 @@
+/* attendance_app/static/style.css (FULL) */
+:root { --bg: #0a2a6b; --bg2: #004aad; --accent: #00d4ff; --card: rgba(255,255,255,0.08); --text: #fff; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, Arial, sans-serif; color: var(--text); background: linear-gradient(135deg, var(--bg), var(--bg2)); min-height: 100vh; }
+header { padding: 14px 20px; background: rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:space-between; backdrop-filter: blur(6px); position:sticky; top:0; z-index: 50; }
+nav a { color: var(--text); margin-right: 12px; text-decoration: none; opacity:.9 }
+nav a:hover { opacity: 1; text-decoration: underline; }
+.container { width: min(1100px, 95%); margin: 24px auto; }
+.card { background: var(--card); border-radius: 16px; padding: 18px; box-shadow: 0 10px 24px rgba(0,0,0,.15); }
+.grid { display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+.btn { background: var(--accent); color:#001b2e; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600; text-decoration:none; display:inline-block; }
+.btn.secondary { background:#e0f7ff; }
+.btn:hover { filter: brightness(1.02); }
+.btn:active { transform: translateY(1px); }
+
+.btn-sm{ padding:6px 10px; font-size:13px; border-radius:10px; }
+
+.btn.danger{
+  background:#ff8080;
+  color:#3a0000;
+}
+
+input, select {
+  width:100%;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.2);
+  background: rgba(255,255,255,.05);
+  color:var(--text);
+}
+
+.tablewrap{
+  width:100%;
+  overflow-x:auto;
+}
+
+.table { width:100%; border-collapse: collapse; table-layout: fixed; }
+.table th, .table td { padding:10px 12px; border-bottom: 1px solid rgba(255,255,255,.15); vertical-align: top; overflow:hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge { padding:4px 8px; border-radius: 999px; background: #1e90ff; color:#fff; font-size: 12px; }
+.flash { padding: 10px 12px; border-radius: 10px; margin: 8px 0; background: rgba(255,255,255,0.15); }
+small { opacity: .9; }
+
+/* Actions cell wraps only inside itself */
+.actions-cell{
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: initial !important;
+}
+.actions-cell .btn{ margin-right: 6px; }
+
+/* checkbox pill */
+.chk{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  padding:8px 10px;
+  border-radius:12px;
+  background: rgba(255,255,255,0.06);
+}
+
+/* ================= MODAL ================= */
+.modal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal-box{
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  background: rgba(20,40,90,0.95);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+}
+
+.modal-box label{
+  display:block;
+  margin-top:10px;
+  font-size:14px;
+}
+
+.modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:14px;
+}
+

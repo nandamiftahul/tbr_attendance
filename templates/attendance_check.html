@@ -1,0 +1,202 @@
+<!-- templates/attendance_check.html -->
+{% extends 'base.html' %}
+{% block title %}Check-In/Out · Attendance{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="m-header">
+    <div>
+      <h2 style="margin:0;">Check-In / Check-Out</h2>
+      <small class="muted">Mobile friendly • Location auto capture</small>
+    </div>
+    <div class="geo-pill" id="geoPill">📍 Getting location…</div>
+  </div>
+
+  <div class="m-controls">
+    <input id="searchEmp" placeholder="Search employee name / code…" autocomplete="off">
+    <div class="seg">
+      <button class="seg-btn active" id="btnIn" type="button" onclick="setAction('check_in')">Check-In</button>
+      <button class="seg-btn" id="btnOut" type="button" onclick="setAction('check_out')">Check-Out</button>
+    </div>
+  </div>
+
+  <!-- Hidden form used for submit -->
+  <form id="checkForm" method="post" style="display:none;">
+    <input type="hidden" name="employee_id" id="employee_id">
+    <input type="hidden" name="action" id="action" value="check_in">
+    <input type="hidden" name="lat" id="lat">
+    <input type="hidden" name="lon" id="lon">
+  </form>
+
+  <div class="m-list" id="empList">
+    {% for e in employees %}
+    <button
+      type="button"
+      class="emp-card"
+      data-name="{{ (e.name or '')|lower }}"
+      data-code="{{ (e.code or '')|lower }}"
+      onclick="submitCheck('{{ e.id }}')"
+    >
+      <div class="emp-main">
+        <div class="emp-name">{{ e.name }}</div>
+        <div class="emp-sub">
+          <span class="pill">{{ e.code }}</span>
+          {% if e.dept %}<span class="pill pill-soft">{{ e.dept }}</span>{% endif %}
+        </div>
+      </div>
+
+      <div class="emp-action">
+        <span class="go" id="goText">→</span>
+      </div>
+    </button>
+    {% endfor %}
+  </div>
+
+  <small class="muted" style="display:block;margin-top:10px;">
+    Tip: If geofence is enabled, you must allow location for Check-In.
+  </small>
+</div>
+
+<style>
+/* Mobile-first layout */
+.m-header{ display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.muted{ opacity:.85; }
+.geo-pill{
+  padding:8px 10px;
+  border-radius:999px;
+  background: rgba(255,255,255,0.10);
+  border:1px solid rgba(255,255,255,0.14);
+  font-size:13px;
+  white-space:nowrap;
+}
+.m-controls{ display:grid; gap:10px; margin-top:12px; }
+.seg{
+  display:flex;
+  gap:8px;
+  background: rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);
+  padding:6px;
+  border-radius:14px;
+}
+.seg-btn{
+  flex:1;
+  border:none;
+  padding:10px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-weight:700;
+  background: transparent;
+  color: rgba(255,255,255,0.85);
+}
+.seg-btn.active{
+  background: rgba(0,212,255,0.95);
+  color:#001b2e;
+}
+
+.m-list{ margin-top:12px; display:grid; gap:10px; }
+.emp-card{
+  width:100%;
+  text-align:left;
+  border:none;
+  cursor:pointer;
+  border-radius:16px;
+  padding:14px 14px;
+  background: rgba(255,255,255,0.08);
+  border:1px solid rgba(255,255,255,0.12);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.emp-card:active{ transform: translateY(1px); }
+.emp-name{ font-size:16px; font-weight:800; line-height:1.15; }
+.emp-sub{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.pill{
+  font-size:12px;
+  padding:4px 8px;
+  border-radius:999px;
+  background: rgba(255,255,255,0.12);
+}
+.pill-soft{ background: rgba(255,255,255,0.08); }
+.emp-action .go{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:34px;
+  height:34px;
+  border-radius:12px;
+  background: rgba(255,255,255,0.10);
+  font-size:18px;
+}
+
+/* On desktop, show 2 columns */
+@media (min-width: 900px){
+  .m-controls{ grid-template-columns: 1.2fr 0.8fr; align-items:center; }
+  .m-list{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+
+<script>
+let currentAction = 'check_in';
+
+function setAction(a){
+  currentAction = a;
+  document.getElementById('action').value = a;
+
+  const inBtn = document.getElementById('btnIn');
+  const outBtn = document.getElementById('btnOut');
+
+  if(a === 'check_in'){
+    inBtn.classList.add('active');
+    outBtn.classList.remove('active');
+  }else{
+    outBtn.classList.add('active');
+    inBtn.classList.remove('active');
+  }
+}
+
+// submit with chosen employee
+function submitCheck(empId){
+  document.getElementById('employee_id').value = empId;
+
+  // If check-in: require location if geolocation supported but not captured yet (optional)
+  // We still submit; backend decides geofence rejection if enabled.
+  document.getElementById('checkForm').submit();
+}
+
+// Search filter
+document.getElementById('searchEmp').addEventListener('input', (e) => {
+  const q = (e.target.value || '').toLowerCase().trim();
+  const cards = document.querySelectorAll('.emp-card');
+  cards.forEach(c => {
+    const name = c.dataset.name || '';
+    const code = c.dataset.code || '';
+    const ok = !q || name.includes(q) || code.includes(q);
+    c.style.display = ok ? '' : 'none';
+  });
+});
+
+// Geolocation capture
+(function(){
+  const pill = document.getElementById('geoPill');
+
+  if (!navigator.geolocation) {
+    pill.textContent = '📍 Not supported';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
+      document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
+      pill.textContent = '📍 Location OK';
+    },
+    (err) => {
+      pill.textContent = '📍 Location denied';
+    },
+    { enableHighAccuracy:true, timeout:6000, maximumAge:0 }
+  );
+})();
+</script>
+
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard · Attendance{% endblock %}
+{% block content %}
+<h1>Today · {{ today }}</h1>
+
+<div class="card" style="margin-bottom:12px;">
+  {% if current_user.role == 'admin' %}
+  <form method="post" action="{{ url_for('holiday_create') }}" style="display:grid;grid-template-columns: 1fr 2fr auto;gap:10px;align-items:end;">
+    <div>
+      <label>Holiday date</label>
+      <input type="date" name="date" required>
+    </div>
+    <div>
+      <label>Holiday name</label>
+      <input name="name" placeholder="e.g., National Holiday" required>
+    </div>
+    <div>
+      <button class="btn" type="submit">Add holiday</button>
+    </div>
+  </form>
+  {% else %}
+  <small>Tip: Ask admin to add holidays so auto-absent ignores them.</small>
+  {% endif %}
+</div>
+
+<div class="grid">
+  <div class="card"><h3>Total Records</h3><div class="badge">{{ stats.total }}</div></div>
+  <div class="card"><h3>Present/Late/WFH</h3><div class="badge">{{ stats.present }}</div></div>
+  <div class="card"><h3>Leave</h3><div class="badge">{{ stats.leave }}</div></div>
+  <div class="card"><h3>Sick</h3><div class="badge">{{ stats.sick }}</div></div>
+  <div class="card"><h3>WFH</h3><div class="badge">{{ stats.wfh }}</div></div>
+  <div class="card"><h3>Absent</h3><div class="badge">{{ stats.absent }}</div></div>
+</div>
+{% endblock %}

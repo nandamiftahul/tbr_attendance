@@ -1,0 +1,241 @@
+<!-- templates/employees.html (REPLACE FULL) -->
+{% extends 'base.html' %}
+{% block title %}Employees · Attendance{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Employees</h2>
+  <form method="get" style="display:flex; gap:8px; margin-bottom:12px;">
+    <input name="q" placeholder="Search name / email / code / dept" value="{{ q }}">
+    <button class="btn" type="submit">Search</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3>Create Employee</h3>
+  <form method="post" action="{{ url_for('employee_create') }}" style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px;">
+    <input name="code" placeholder="Code (unique)" required>
+    <input name="name" placeholder="Name" required>
+    <input name="email" placeholder="Employee Email">
+    <input name="dept" placeholder="Department">
+
+    <select name="shift_id">
+      <option value="">— shift (optional) —</option>
+      {% for s in shifts %}
+      <option value="{{ s.id }}">{{ s.name }} ({{ s.start_time }}-{{ s.end_time }})</option>
+      {% endfor %}
+    </select>
+
+    <button class="btn" type="submit">Add</button>
+
+    <!-- LOGIN CREATE -->
+    <div style="grid-column:1/-1; margin-top:6px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+      <label class="chk" style="margin-bottom:8px;">
+        <input type="checkbox" id="create_login" name="create_login" value="1" onchange="toggleCreateLogin()">
+        Create login account for this employee
+      </label>
+
+      <div id="createLoginBox" style="display:none; gap:8px; grid-template-columns: repeat(3, 1fr);">
+        <input name="login_email" placeholder="Login username (email) e.g user@company.com">
+        <input name="login_password" placeholder="Initial password" type="password">
+        <small style="opacity:.9; align-self:center;">Password stored hashed</small>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="tablewrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:90px;">Code</th>
+          <th style="width:170px;">Name</th>
+          <th style="width:210px;">Employee Email</th>
+          <th style="width:140px;">Dept</th>
+          <th style="width:160px;">Shift</th>
+          <th style="width:220px;">Login Username</th>
+          <th style="width:90px;">Active</th>
+          <th style="width:170px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.code }}</td>
+          <td>{{ r.name }}</td>
+          <td title="{{ r.email or '' }}">{{ r.email or '' }}</td>
+          <td>{{ r.dept or '' }}</td>
+          <td>{{ r.shift.name if r.shift else '' }}</td>
+          <td title="{{ r.user.email if r.user else '' }}">{{ r.user.email if r.user else '' }}</td>
+          <td>{{ 'Yes' if r.is_active else 'No' }}</td>
+
+          <td class="actions-cell">
+            <button
+              type="button"
+              class="btn secondary btn-sm js-edit"
+              data-id="{{ r.id }}"
+              data-code="{{ r.code|e }}"
+              data-name="{{ r.name|e }}"
+              data-email="{{ (r.email or '')|e }}"
+              data-dept="{{ (r.dept or '')|e }}"
+              data-shift="{{ (r.shift_id or '') }}"
+              data-active="{{ '1' if r.is_active else '0' }}"
+              data-login="{{ (r.user.email if r.user else '')|e }}"
+              data-haslogin="{{ '1' if r.user else '0' }}"
+            >Edit</button>
+
+            <form method="post"
+                  action="{{ url_for('employee_delete', emp_id=r.id) }}"
+                  style="display:inline"
+                  onsubmit="return confirm('Delete {{ r.name }}?')">
+              <button class="btn danger btn-sm" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ===================== EDIT MODAL ===================== -->
+<div id="editModal" class="modal">
+  <div class="modal-box">
+    <h3 style="margin-top:0;">Edit Employee</h3>
+
+    <form id="editForm" method="post">
+      <label>Code</label>
+      <input name="code" id="e_code" required>
+
+      <label>Name</label>
+      <input name="name" id="e_name" required>
+
+      <label>Employee Email</label>
+      <input name="email" id="e_email">
+
+      <label>Department</label>
+      <input name="dept" id="e_dept">
+
+      <label>Shift</label>
+      <select name="shift_id" id="e_shift">
+        <option value="">— no shift —</option>
+        {% for s in shifts %}
+        <option value="{{ s.id }}">{{ s.name }} ({{ s.start_time }}-{{ s.end_time }})</option>
+        {% endfor %}
+      </select>
+
+      <!-- LOGIN -->
+      <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.12);">
+        <h4 style="margin:0 0 8px 0;">Login Account</h4>
+
+        <div id="loginExistsBox" style="display:none;">
+          <label>Login username (email)</label>
+          <input name="login_email" id="e_login_email" placeholder="user@company.com">
+
+          <label class="chk" style="margin-top:10px;">
+            <input type="checkbox" name="reset_password" value="1" id="e_reset_pw" onchange="toggleResetPw()">
+            Reset password
+          </label>
+
+          <div id="resetPwBox" style="display:none;">
+            <label>New password</label>
+            <input name="new_password" id="e_new_pw" type="password" placeholder="New password">
+          </div>
+        </div>
+
+        <div id="loginCreateBox" style="display:none;">
+          <label class="chk">
+            <input type="checkbox" name="create_login" value="1" id="e_create_login" onchange="toggleCreateInModal()">
+            Create login for this employee
+          </label>
+
+          <div id="createPwBox" style="display:none;">
+            <label>Login username (email)</label>
+            <input name="login_email" id="e_login_email2" placeholder="user@company.com">
+            <label>Initial password</label>
+            <input name="new_password" id="e_new_pw2" type="password" placeholder="Initial password">
+          </div>
+        </div>
+      </div>
+
+      <label class="chk" style="margin-top:12px;">
+        <input type="checkbox" name="is_active" id="e_active">
+        Active
+      </label>
+
+      <div class="modal-actions">
+        <button class="btn secondary" type="submit">Save</button>
+        <button class="btn" type="button" id="btnCancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function toggleCreateLogin(){
+  const box = document.getElementById('createLoginBox');
+  const cb  = document.getElementById('create_login');
+  box.style.display = cb.checked ? 'grid' : 'none';
+}
+
+function toggleResetPw(){
+  const cb = document.getElementById('e_reset_pw');
+  document.getElementById('resetPwBox').style.display = cb.checked ? 'block' : 'none';
+}
+
+function toggleCreateInModal(){
+  const cb = document.getElementById('e_create_login');
+  document.getElementById('createPwBox').style.display = cb.checked ? 'block' : 'none';
+}
+
+(function(){
+  const modal = document.getElementById('editModal');
+  const form  = document.getElementById('editForm');
+
+  function openModal() { modal.style.display = 'flex'; }
+  function closeModal(){ modal.style.display = 'none'; }
+
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  document.getElementById('btnCancel').addEventListener('click', closeModal);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+  document.querySelectorAll('.js-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+
+      form.action = `/employees/${id}/update`;
+
+      document.getElementById('e_code').value = btn.dataset.code || '';
+      document.getElementById('e_name').value = btn.dataset.name || '';
+      document.getElementById('e_email').value = btn.dataset.email || '';
+      document.getElementById('e_dept').value = btn.dataset.dept || '';
+      document.getElementById('e_shift').value = btn.dataset.shift || '';
+      document.getElementById('e_active').checked = (btn.dataset.active === '1');
+
+      // login state
+      const hasLogin = (btn.dataset.haslogin === '1');
+      document.getElementById('loginExistsBox').style.display = hasLogin ? 'block' : 'none';
+      document.getElementById('loginCreateBox').style.display = hasLogin ? 'none' : 'block';
+
+      // reset UI
+      document.getElementById('e_reset_pw').checked = false;
+      document.getElementById('resetPwBox').style.display = 'none';
+      document.getElementById('e_create_login').checked = false;
+      document.getElementById('createPwBox').style.display = 'none';
+
+      if (hasLogin){
+        document.getElementById('e_login_email').value = btn.dataset.login || '';
+        document.getElementById('e_new_pw').value = '';
+      } else {
+        document.getElementById('e_login_email2').value = '';
+        document.getElementById('e_new_pw2').value = '';
+      }
+
+      openModal();
+    });
+  });
+})();
+</script>
+
+{% endblock %}

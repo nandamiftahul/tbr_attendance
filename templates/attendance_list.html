@@ -1,0 +1,128 @@
+<!-- templates/attendance_list.html -->
+{% extends 'base.html' %}
+{% block title %}Records · Attendance{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Attendance Records</h2>
+  <form method="get" style="display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; align-items:end;">
+    <div>
+      <label>Start</label>
+      <input type="date" name="start" value="{{ start or '' }}">
+    </div>
+    <div>
+      <label>End</label>
+      <input type="date" name="end" value="{{ end or '' }}">
+    </div>
+    <div>
+      <label>Employee</label>
+      <input name="employee" placeholder="Name contains..." value="{{ emp or '' }}">
+    </div>
+
+    <div style="display:flex; gap:8px;">
+      <button class="btn" type="submit">Filter</button>
+      <a class="btn secondary" href="{{ url_for('attendance_export_csv', start=start, end=end, employee=emp) }}">Export CSV</a>
+      <a class="btn secondary" href="{{ url_for('attendance_export_xlsx', start=start, end=end, employee=emp) }}">Export Excel</a>
+    </div>
+
+    <div></div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="tablewrap">
+    <table class="table table-fixed">
+      <thead>
+        <tr>
+          <th class="col-date">Date</th>
+          <th class="col-code">Code</th>
+          <th class="col-name">Name</th>
+          <th class="col-dept">Dept</th>
+          <th class="col-ci">Check-In</th>
+          <th class="col-co">Check-Out</th>
+          <th class="col-hours">Hours</th>
+          <th class="col-status">Status</th>
+          <th class="col-note">Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.work_date }}</td>
+          <td>{{ r.employee.code }}</td>
+          <td class="truncate" title="{{ r.employee.name }}">{{ r.employee.name }}</td>
+          <td class="truncate" title="{{ r.employee.dept or '' }}">{{ r.employee.dept or '' }}</td>
+
+          <td>
+            <div class="dt">{{ r.check_in.strftime('%Y-%m-%d %H:%M:%S') if r.check_in else '' }}</div>
+            <div class="meta">IP: {{ r.check_in_ip or '' }}</div>
+            <div class="meta truncate" title="{{ r.check_in_ua or '' }}">UA: {{ r.check_in_ua or '' }}</div>
+          </td>
+
+          <td>
+            <div class="dt">{{ r.check_out.strftime('%Y-%m-%d %H:%M:%S') if r.check_out else '' }}</div>
+            <div class="meta">IP: {{ r.check_out_ip or '' }}</div>
+            <div class="meta truncate" title="{{ r.check_out_ua or '' }}">UA: {{ r.check_out_ua or '' }}</div>
+          </td>
+
+          <td>{{ '%.2f'|format(r.duration_hours) }}</td>
+          <td><span class="badge">{{ r.status }}</span></td>
+          <td class="truncate" title="{{ r.note or '' }}">{{ r.note or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="opacity:.8; font-size:12px; margin-top:8px;">
+    Tip: swipe/drag the table left-right to see all columns.
+  </div>
+</div>
+
+<style>
+/* make table scrollable horizontally */
+.tablewrap{
+  width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+}
+
+/* keep table readable */
+.table-fixed{
+  min-width: 1100px;   /* important so scroll appears */
+}
+
+.table-fixed th, .table-fixed td{
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+/* allow some columns to wrap/fit */
+.col-ci, .col-co, .col-note{
+  white-space: normal;
+  min-width: 260px;
+}
+.col-name{ min-width: 180px; }
+.col-dept{ min-width: 140px; }
+.col-date{ min-width: 110px; }
+.col-code{ min-width: 80px; }
+.col-hours{ min-width: 80px; }
+.col-status{ min-width: 110px; }
+
+.dt{ font-weight: 600; }
+.meta{ font-size: 12px; opacity: .9; }
+
+/* truncate long text */
+.truncate{
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ensure text contrast (in case base theme makes it faint) */
+.table-fixed td, .table-fixed th { color: rgba(255,255,255,0.92); }
+</style>
+
+{% endblock %}

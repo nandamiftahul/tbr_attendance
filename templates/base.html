@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Attendance{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header>
+      <div><strong>Attendance Manager</strong></div>
+      <nav>
+        {% if current_user.is_authenticated %}
+          <a href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a href="{{ url_for('offices_admin') }}">Office Location</a>
+          <a href="{{ url_for('attendance_check_get') }}">Check-In/Out</a>
+          <a href="{{ url_for('attendance_list') }}">Records</a>
+          <a href="{{ url_for('leave_request_form') }}">Leave/Sick</a>
+          {% if current_user.role == 'admin' %}
+            <a href="{{ url_for('employees') }}">Employees</a>
+            <a href="{{ url_for('leave_approvals') }}">Approvals</a>
+          {% endif %}
+          <a href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+          <a href="{{ url_for('login') }}">Login</a>
+        {% endif %}
+      </nav>
+    </header>
+
+    <main class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for cat, msg in messages %}
+            <div class="flash">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

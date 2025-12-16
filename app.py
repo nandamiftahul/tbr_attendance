@@ -1,0 +1,896 @@
+# app.py
+
+import os
+import math
+from datetime import datetime, date, time, timedelta
+from zoneinfo import ZoneInfo
+
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from dotenv import load_dotenv
+from io import StringIO
+import csv, io
+import openpyxl
+from openpyxl.utils import get_column_letter
+
+from sqlalchemy import or_
+
+from models import db, User, Employee, Attendance, LeaveRequest, Holiday, Shift, Office
+from flask import jsonify, Response
+from flask_login import login_required
+from werkzeug.security import generate_password_hash
+
+GOOGLE_ENABLED = False
+try:
+    from authlib.integrations.flask_client import OAuth
+except Exception:
+    OAuth = None
+
+load_dotenv()
+TZ = os.getenv("TIMEZONE", "Asia/Jakarta")
+
+app = Flask(__name__, instance_relative_config=True)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret")
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.sqlite")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+os.makedirs(app.instance_path, exist_ok=True)
+
+db.init_app(app)
+
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+
+@login_manager.unauthorized_handler
+def unauthorized_callback():
+    # For API calls, return JSON instead of HTML redirect
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    return redirect(url_for("login", next=request.path))
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+def get_client_ip() -> str:
+    return (request.headers.get("X-Forwarded-For", request.remote_addr or "") or "")[:63]
+
+def get_user_agent() -> str:
+    return (request.headers.get("User-Agent") or "")[:255]
+
+def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    R = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+def geofence_ok(lat, lon) -> bool:
+    office = Office.query.filter_by(is_active=True).first()
+    if not office:
+        return True
+
+    if lat is None or lon is None:
+        return False
+
+    return haversine_m(
+        office.lat, office.lon,
+        float(lat), float(lon)
+    ) <= office.radius_m
+
+def active_shift_for(emp: Employee) -> Shift:
+    if emp and emp.shift:
+        return emp.shift
+    s = Shift.query.filter_by(name="Office").first()
+    if s:
+        return s
+    return Shift(name="Default", start_time=time(9, 0), end_time=time(17, 0), grace_in_min=15, grace_out_min=0)
+
+def is_holiday(d: date) -> bool:
+    return Holiday.query.filter_by(date=d).first() is not None
+
+def approved_leave_for(emp_id: int, d: date):
+    return LeaveRequest.query.filter(
+        LeaveRequest.employee_id == emp_id,
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= d,
+        LeaveRequest.end_date >= d,
+    ).first()
+
+# ✅ helper create/link user
+def create_user_for_employee(emp: Employee, login_email: str, password: str):
+    login_email = (login_email or "").strip().lower()
+    if not login_email:
+        raise ValueError("Login email/username is required.")
+    if not password:
+        raise ValueError("Password is required.")
+    if User.query.filter_by(email=login_email).first():
+        raise ValueError("Login email already exists.")
+
+    u = User(name=emp.name, email=login_email, role="staff", is_active=True)
+    u.set_password(password)
+    db.session.add(u)
+    db.session.flush()  # get u.id
+    emp.user_id = u.id
+
+@app.cli.command("initdb")
+def initdb():
+    with app.app_context():
+        db.create_all()
+        if not User.query.filter_by(email="admin@example.com").first():
+            admin = User(name="Administrator", email="admin@example.com", role="admin")
+            admin.set_password("admin123")
+            db.session.add(admin)
+        if Shift.query.count() == 0:
+            db.session.add(Shift(name="Office", start_time=time(9, 0), end_time=time(17, 0), grace_in_min=15, grace_out_min=0))
+        if Office.query.count() == 0:
+            db.session.add(Office(
+                name="Test Office",
+                lat=-6.3614579,
+                lon=106.8180971,
+                radius_m=300,
+                is_active=True
+            ))
+        db.session.commit()
+        print("DB initialized. Default admin: admin@example.com / admin123")
+
+@app.cli.command("mark-absent")
+def mark_absent():
+    with app.app_context():
+        today = date.today()
+        if is_holiday(today):
+            print("Holiday today. Skipping absent marking.")
+            return
+        active = Employee.query.filter_by(is_active=True).all()
+        created = 0
+        for e in active:
+            if approved_leave_for(e.id, today):
+                continue
+            exists = Attendance.query.filter_by(employee_id=e.id, work_date=today).first()
+            if not exists:
+                db.session.add(Attendance(employee_id=e.id, work_date=today, status="absent", note="Auto-marked"))
+                created += 1
+        db.session.commit()
+        print(f"Absent records created: {created}")
+
+# ---- Google SSO part unchanged ----
+if OAuth and os.getenv("GOOGLE_OAUTH_CLIENT_ID"):
+    oauth = OAuth(app)
+    oauth.register(
+        name="google",
+        client_id=os.getenv("GOOGLE_OAUTH_CLIENT_ID"),
+        client_secret=os.getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+    GOOGLE_ENABLED = True
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
+        user = User.query.filter_by(email=email, is_active=True).first()
+        if user and user.check_password(password):
+            login_user(user)
+            flash("Welcome back!", "success")
+            return redirect(url_for("dashboard"))
+        flash("Invalid credentials", "danger")
+    return render_template("login.html", google_enabled=GOOGLE_ENABLED)
+
+@app.get("/login/google")
+def login_google():
+    if not GOOGLE_ENABLED:
+        flash("Google SSO is disabled", "warning")
+        return redirect(url_for("login"))
+    redirect_uri = url_for("auth_callback_google", _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+@app.get("/auth/callback/google")
+def auth_callback_google():
+    if not GOOGLE_ENABLED:
+        return redirect(url_for("login"))
+    token = oauth.google.authorize_access_token()
+    userinfo = token.get("userinfo") or oauth.google.parse_id_token(token)
+    email = (userinfo.get("email") or "").strip().lower()
+    name = userinfo.get("name") or (email.split("@")[0] if email else "User")
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        user = User(name=name, email=email, role="staff", is_active=True)
+        user.set_password(os.urandom(8).hex())
+        db.session.add(user)
+        db.session.commit()
+    login_user(user)
+    flash("Logged in with Google", "success")
+    return redirect(url_for("dashboard"))
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("Logged out", "info")
+    return redirect(url_for("login"))
+
+
+def _employee_for_user(user: User):
+    # employee linked via employees.user_id
+    return Employee.query.filter_by(user_id=user.id).first()
+
+@app.post("/api/profile/change_password")
+@login_required
+def api_change_password():
+    data = request.get_json(silent=True) or {}
+    old_pw = (data.get("old_password") or "").strip()
+    new_pw = (data.get("new_password") or "").strip()
+
+    if not old_pw or not new_pw:
+        return jsonify({"ok": False, "error": "Old and new password required"}), 400
+    if len(new_pw) < 6:
+        return jsonify({"ok": False, "error": "Password must be at least 6 characters"}), 400
+
+    # check old password
+    if not current_user.check_password(old_pw):
+        return jsonify({"ok": False, "error": "Old password is wrong"}), 400
+
+    current_user.set_password(new_pw)
+    db.session.commit()
+    return jsonify({"ok": True, "message": "Password updated"})
+
+@app.post("/api/login")
+def api_login():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    user = User.query.filter_by(email=email, is_active=True).first()
+    if not user or not user.check_password(password):
+        return jsonify({"ok": False, "error": "Invalid credentials"}), 401
+
+    # create a very simple tokenless session by logging-in (cookie session)
+    login_user(user)
+    return jsonify({"ok": True, "role": user.role, "name": user.name, "email": user.email})
+
+@app.post("/api/logout")
+@login_required
+def api_logout():
+    logout_user()
+    return jsonify({"ok": True})
+
+@app.get("/api/me")
+@login_required
+def api_me():
+    emp = _employee_for_user(current_user)
+    return jsonify({
+        "ok": True,
+        "user": {"name": current_user.name, "email": current_user.email, "role": current_user.role},
+        "employee": ({"id": emp.id, "code": emp.code, "name": emp.name, "dept": emp.dept} if emp else None)
+    })
+
+@app.post("/api/attendance/check")
+@login_required
+def api_attendance_check():
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked to this account"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    action = data.get("action")  # check_in/check_out
+    lat = data.get("lat")
+    lon = data.get("lon")
+
+    lat = float(lat) if lat is not None else None
+    lon = float(lon) if lon is not None else None
+
+    now = datetime.now(ZoneInfo(TZ))
+    today = date.today()
+
+    # optional geofence on check-in
+    if action == "check_in" and not geofence_ok(lat, lon):
+        return jsonify({"ok": False, "error": "Outside geofence"}), 403
+
+    record = Attendance.query.filter_by(employee_id=emp.id, work_date=today).first()
+    if not record:
+        record = Attendance(employee_id=emp.id, work_date=today)
+        db.session.add(record)
+
+    if action == "check_in":
+        if record.check_in:
+            return jsonify({"ok": False, "error": "Already checked in"}), 409
+        record.check_in = now
+        record.check_in_ip = get_client_ip()
+        record.check_in_ua = get_user_agent()
+        record.check_in_lat = lat
+        record.check_in_lon = lon
+        record.status = "present"
+        db.session.commit()
+        return jsonify({"ok": True, "message": "Checked in", "time": now.isoformat()})
+
+    if action == "check_out":
+        if not record.check_in:
+            return jsonify({"ok": False, "error": "Cannot check out before check in"}), 409
+        if record.check_out:
+            return jsonify({"ok": False, "error": "Already checked out"}), 409
+        record.check_out = now
+        record.check_out_ip = get_client_ip()
+        record.check_out_ua = get_user_agent()
+        record.check_out_lat = lat
+        record.check_out_lon = lon
+        db.session.commit()
+        return jsonify({"ok": True, "message": "Checked out", "time": now.isoformat()})
+
+    return jsonify({"ok": False, "error": "Unknown action"}), 400
+
+@app.post("/api/leave/request")
+@login_required
+def api_leave_request():
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+
+    data = request.get_json(silent=True) or {}
+
+    req_type = (data.get("type") or "").strip().lower()
+    reason = (data.get("reason") or "").strip()
+
+    try:
+        start_date = datetime.strptime(data.get("start_date"), "%Y-%m-%d").date()
+        end_date = datetime.strptime(data.get("end_date"), "%Y-%m-%d").date()
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid date format"}), 400
+
+    if req_type not in ("leave", "sick", "wfh"):
+        return jsonify({"ok": False, "error": "Invalid type"}), 400
+
+    if end_date < start_date:
+        return jsonify({"ok": False, "error": "End date must be >= start date"}), 400
+
+    r = LeaveRequest(
+        employee_id=emp.id,
+        type=req_type,
+        start_date=start_date,
+        end_date=end_date,
+        reason=reason,
+        status="pending",
+        approved_by=None,
+    )
+
+    db.session.add(r)
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "id": r.id,
+        "status": r.status
+    })
+
+
+# --- API: list my leave requests ---
+@app.get("/api/leave/my")
+@login_required
+def api_leave_my():
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+
+    rows = LeaveRequest.query.filter_by(employee_id=emp.id).order_by(LeaveRequest.id.desc()).all()
+    return jsonify({"ok": True, "rows": [{
+        "id": r.id,
+        "type": r.type,
+        "start_date": str(r.start_date),
+        "end_date": str(r.end_date),
+        "status": r.status,
+        "reason": r.reason or "",
+        "approved_by": r.approved_by,
+    } for r in rows]})
+
+
+# --- API: list my attendance records ---
+@app.get("/api/attendance/my")
+@login_required
+def api_attendance_my():
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+
+    start = request.args.get("start")  # YYYY-MM-DD
+    end = request.args.get("end")      # YYYY-MM-DD
+
+    q = Attendance.query.filter_by(employee_id=emp.id)
+
+    if start:
+        q = q.filter(Attendance.work_date >= start)
+    if end:
+        q = q.filter(Attendance.work_date <= end)
+
+    rows = q.order_by(Attendance.work_date.desc()).limit(500).all()
+    return jsonify({"ok": True, "rows": [{
+        "date": r.work_date.isoformat(),
+        "check_in": r.check_in.isoformat(sep=" ") if r.check_in else "",
+        "check_out": r.check_out.isoformat(sep=" ") if r.check_out else "",
+        "hours": float(r.duration_hours or 0.0),
+        "status": r.status,
+        "note": r.note or "",
+    } for r in rows]})
+
+
+@app.route("/")
+@login_required
+def dashboard():
+    today = date.today()
+    recs = Attendance.query.filter_by(work_date=today).all()
+    present = sum(1 for r in recs if r.status in ("present", "late", "wfh"))
+    leave = sum(1 for r in recs if r.status == "leave")
+    sick = sum(1 for r in recs if r.status == "sick")
+    wfh = sum(1 for r in recs if r.status == "wfh")
+    absent = sum(1 for r in recs if r.status == "absent")
+    total = len(recs)
+    return render_template("dashboard.html", today=today, stats=dict(total=total, present=present, leave=leave, sick=sick, wfh=wfh, absent=absent))
+
+@app.route("/employees")
+@login_required
+def employees():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+    q = request.args.get("q", "").strip()
+    query = Employee.query
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(Employee.name.ilike(like), Employee.email.ilike(like), Employee.code.ilike(like), Employee.dept.ilike(like)))
+    rows = query.order_by(Employee.name.asc()).all()
+    shifts = Shift.query.order_by(Shift.start_time.asc()).all()
+    return render_template("employees.html", rows=rows, q=q, shifts=shifts)
+
+@app.post("/employees/create")
+@login_required
+def employee_create():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("employees"))
+
+    shift_id = request.form.get("shift_id")
+    emp = Employee(
+        code=request.form.get("code"),
+        name=request.form.get("name"),
+        email=request.form.get("email"),
+        dept=request.form.get("dept"),
+        shift_id=(int(shift_id) if shift_id else None),
+        is_active=True,
+    )
+    db.session.add(emp)
+    db.session.flush()
+
+    # ✅ optional create login
+    if request.form.get("create_login") == "1":
+        login_email = request.form.get("login_email")
+        login_password = request.form.get("login_password")
+        try:
+            create_user_for_employee(emp, login_email, login_password)
+            flash(f"Login created: {login_email}", "info")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Employee created but login failed: {e}", "danger")
+            return redirect(url_for("employees"))
+
+    db.session.commit()
+    flash("Employee created", "success")
+    return redirect(url_for("employees"))
+
+@app.post("/employees/<int:emp_id>/update")
+@login_required
+def employee_update(emp_id):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("employees"))
+
+    emp = Employee.query.get_or_404(emp_id)
+    emp.code = request.form.get("code")
+    emp.name = request.form.get("name")
+    emp.email = request.form.get("email")
+    emp.dept = request.form.get("dept")
+    emp.is_active = bool(request.form.get("is_active"))
+
+    shift_id = request.form.get("shift_id")
+    emp.shift_id = (int(shift_id) if shift_id else None)
+
+    # ✅ login update / create / reset
+    login_email = (request.form.get("login_email") or "").strip().lower()
+    reset_pw = request.form.get("reset_password") == "1"
+    new_pw = request.form.get("new_password") or ""
+
+    try:
+        if emp.user_id:
+            u = User.query.get(emp.user_id)
+            if u:
+                if login_email and login_email != u.email:
+                    if User.query.filter(User.email == login_email, User.id != u.id).first():
+                        raise ValueError("Login email already exists.")
+                    u.email = login_email
+                u.name = emp.name
+                u.is_active = emp.is_active
+
+                if reset_pw:
+                    if not new_pw:
+                        raise ValueError("New password cannot be empty.")
+                    u.set_password(new_pw)
+        else:
+            # create login from modal if requested
+            if request.form.get("create_login") == "1":
+                if not login_email:
+                    raise ValueError("Login email is required.")
+                if not new_pw:
+                    raise ValueError("Password is required.")
+                create_user_for_employee(emp, login_email, new_pw)
+
+        db.session.commit()
+        flash("Employee updated", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Update failed: {e}", "danger")
+
+    return redirect(url_for("employees"))
+
+@app.post("/employees/<int:emp_id>/delete")
+@login_required
+def employee_delete(emp_id):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("employees"))
+
+    emp = Employee.query.get_or_404(emp_id)
+    try:
+        # optional: delete linked user
+        if emp.user_id:
+            u = User.query.get(emp.user_id)
+            if u:
+                db.session.delete(u)
+        db.session.delete(emp)
+        db.session.commit()
+        flash("Employee deleted", "info")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Delete failed: {e}", "danger")
+    return redirect(url_for("employees"))
+
+@app.post("/shifts/create")
+@login_required
+def shift_create():
+    if current_user.role != "admin":
+        return redirect(url_for("employees"))
+    name = request.form.get("name")
+    st = datetime.strptime(request.form.get("start_time"), "%H:%M").time()
+    et = datetime.strptime(request.form.get("end_time"), "%H:%M").time()
+    grace_in = int(request.form.get("grace_in_min", 15))
+    grace_out = int(request.form.get("grace_out_min", 0))
+    s = Shift(name=name, start_time=st, end_time=et, grace_in_min=grace_in, grace_out_min=grace_out)
+    db.session.add(s)
+    db.session.commit()
+    flash("Shift created", "success")
+    return redirect(url_for("employees"))
+
+@app.post("/holidays/create")
+@login_required
+def holiday_create():
+    if current_user.role != "admin":
+        return redirect(url_for("dashboard"))
+    d = datetime.strptime(request.form.get("date"), "%Y-%m-%d").date()
+    name = request.form.get("name")
+    if not Holiday.query.filter_by(date=d).first():
+        db.session.add(Holiday(date=d, name=name))
+        db.session.commit()
+        flash("Holiday added", "success")
+    else:
+        flash("Holiday already exists", "warning")
+    return redirect(url_for("dashboard"))
+
+@app.get("/attendance/check")
+@login_required
+def attendance_check_get():
+    employees = Employee.query.filter_by(is_active=True).order_by(Employee.name.asc()).all()
+    return render_template("attendance_check.html", employees=employees)
+
+@app.post("/attendance/check")
+@login_required
+def attendance_check_post():
+    emp_id = int(request.form.get("employee_id"))
+    action = request.form.get("action")
+    lat = request.form.get("lat")
+    lon = request.form.get("lon")
+    lat = float(lat) if lat else None
+    lon = float(lon) if lon else None
+    now = datetime.now(ZoneInfo(TZ))
+    today = date.today()
+    emp = Employee.query.get_or_404(emp_id)
+
+    if action == "check_in" and not geofence_ok(lat, lon):
+        flash("Check-in rejected: outside geofence.", "danger")
+        return redirect(url_for("attendance_check_get"))
+
+    record = Attendance.query.filter_by(employee_id=emp_id, work_date=today).first()
+    if not record:
+        record = Attendance(employee_id=emp_id, work_date=today)
+        db.session.add(record)
+
+    if action == "check_in":
+        if record.check_in:
+            flash("Already checked in", "warning")
+        else:
+            record.check_in = now
+            record.check_in_ip = get_client_ip()
+            record.check_in_ua = get_user_agent()
+            record.check_in_lat = lat
+            record.check_in_lon = lon
+
+            sh = active_shift_for(emp)
+            start_dt = datetime.combine(today, sh.start_time, tzinfo=ZoneInfo(TZ))
+            late_threshold = start_dt + timedelta(minutes=sh.grace_in_min)
+            if now > late_threshold:
+                record.status = "late"
+                record.note = (record.note or "") + f" Late check-in; shift {sh.name}."
+            else:
+                record.status = "present"
+            flash("Checked in", "success")
+
+    elif action == "check_out":
+        if not record.check_in:
+            flash("Cannot check out before check in", "danger")
+        elif record.check_out:
+            flash("Already checked out", "warning")
+        else:
+            record.check_out = now
+            record.check_out_ip = get_client_ip()
+            record.check_out_ua = get_user_agent()
+            record.check_out_lat = lat
+            record.check_out_lon = lon
+
+            sh = active_shift_for(emp)
+            end_dt = datetime.combine(today, sh.end_time, tzinfo=ZoneInfo(TZ))
+            early_threshold = end_dt - timedelta(minutes=sh.grace_out_min)
+            if now < early_threshold:
+                record.note = (record.note or "") + f" Early checkout; shift {sh.name}."
+            flash("Checked out — good job!", "success")
+    else:
+        flash("Unknown action", "danger")
+
+    db.session.commit()
+    return redirect(url_for("attendance_check_get"))
+
+@app.get("/attendance/list")
+@login_required
+def attendance_list():
+    start = request.args.get("start")
+    end = request.args.get("end")
+    emp = request.args.get("employee")
+    query = Attendance.query.join(Employee)
+    if start:
+        query = query.filter(Attendance.work_date >= start)
+    if end:
+        query = query.filter(Attendance.work_date <= end)
+    if emp:
+        query = query.filter(Employee.name.ilike(f"%{emp}%"))
+    rows = query.order_by(Attendance.work_date.desc(), Employee.name.asc()).all()
+    return render_template("attendance_list.html", rows=rows, start=start, end=end, emp=emp)
+
+@app.get('/attendance/export.csv')
+@login_required
+def attendance_export_csv():
+    start = request.args.get('start')
+    end = request.args.get('end')
+    emp = request.args.get('employee')
+
+    query = Attendance.query.join(Employee)
+    if start:
+        query = query.filter(Attendance.work_date >= start)
+    if end:
+        query = query.filter(Attendance.work_date <= end)
+    if emp:
+        query = query.filter(Employee.name.ilike(f"%{emp}%"))
+
+    rows = query.order_by(Attendance.work_date.asc(), Employee.name.asc()).all()
+
+    output = io.StringIO()
+    cw = csv.writer(output)
+    cw.writerow(['Date', 'Employee Code', 'Employee Name', 'Dept',
+                 'Check-In', 'Check-Out', 'Hours', 'Status', 'Note',
+                 'CheckIn IP', 'CheckIn UA', 'CheckOut IP', 'CheckOut UA'])
+
+    for r in rows:
+        cw.writerow([
+            r.work_date.isoformat(),
+            r.employee.code,
+            r.employee.name,
+            r.employee.dept or '',
+            r.check_in.isoformat(sep=' ') if r.check_in else '',
+            r.check_out.isoformat(sep=' ') if r.check_out else '',
+            r.duration_hours,
+            r.status,
+            r.note or '',
+            r.check_in_ip or '',
+            r.check_in_ua or '',
+            r.check_out_ip or '',
+            r.check_out_ua or '',
+        ])
+
+    csv_data = output.getvalue()
+    return Response(
+        csv_data,
+        mimetype='text/csv',
+        headers={"Content-Disposition": "attachment; filename=attendance_export.csv"}
+    )
+
+@app.get('/attendance/export.xlsx')
+@login_required
+def attendance_export_xlsx():
+    start = request.args.get('start')
+    end = request.args.get('end')
+    emp = request.args.get('employee')
+
+    query = Attendance.query.join(Employee)
+    if start:
+        query = query.filter(Attendance.work_date >= start)
+    if end:
+        query = query.filter(Attendance.work_date <= end)
+    if emp:
+        query = query.filter(Employee.name.ilike(f"%{emp}%"))
+
+    rows = query.order_by(Attendance.work_date.asc(), Employee.name.asc()).all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Attendance"
+
+    headers = ['Date', 'Code', 'Name', 'Dept', 'Check-In', 'Check-Out', 'Hours', 'Status', 'Note',
+               'CheckIn IP', 'CheckIn UA', 'CheckOut IP', 'CheckOut UA']
+    ws.append(headers)
+
+    for r in rows:
+        ws.append([
+            r.work_date.isoformat(),
+            r.employee.code,
+            r.employee.name,
+            r.employee.dept or '',
+            r.check_in.isoformat(sep=' ') if r.check_in else '',
+            r.check_out.isoformat(sep=' ') if r.check_out else '',
+            r.duration_hours,
+            r.status,
+            r.note or '',
+            r.check_in_ip or '',
+            r.check_in_ua or '',
+            r.check_out_ip or '',
+            r.check_out_ua or '',
+        ])
+
+    # autosize columns (simple)
+    for col_idx in range(1, len(headers) + 1):
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = 18
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name="attendance_export.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+@app.get("/leave/request")
+@login_required
+def leave_request_form():
+    employees = Employee.query.filter_by(is_active=True).order_by(Employee.name.asc()).all()
+    return render_template("leave_request.html", employees=employees)
+
+@app.post("/leave/request")
+@login_required
+def leave_request_submit():
+    emp_id = int(request.form.get("employee_id"))
+    typ = request.form.get("type")
+    start_date = datetime.strptime(request.form.get("start_date"), "%Y-%m-%d").date()
+    end_date = datetime.strptime(request.form.get("end_date"), "%Y-%m-%d").date()
+    reason = request.form.get("reason")
+    lr = LeaveRequest(employee_id=emp_id, type=typ, start_date=start_date, end_date=end_date, reason=reason, status="pending")
+    db.session.add(lr)
+    db.session.commit()
+    flash("Request submitted", "success")
+    return redirect(url_for("leave_request_form"))
+
+@app.get("/leave/approvals")
+@login_required
+def leave_approvals():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+    rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
+    return render_template("approvals.html", rows=rows)
+
+@app.post("/leave/<int:rid>/approve")
+@login_required
+def leave_approve(rid):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("leave_approvals"))
+    r = LeaveRequest.query.get_or_404(rid)
+    r.status = "approved"
+    r.approved_by = current_user.id
+    db.session.commit()
+
+    d = r.start_date
+    while d <= r.end_date:
+        a = Attendance.query.filter_by(employee_id=r.employee_id, work_date=d).first()
+        if not a:
+            a = Attendance(employee_id=r.employee_id, work_date=d)
+            db.session.add(a)
+        a.status = "wfh" if r.type == "wfh" else r.type
+        a.note = (a.note or "") + f" Marked by approval #{r.id}."
+        d += timedelta(days=1)
+
+    db.session.commit()
+    flash("Approved", "success")
+    return redirect(url_for("leave_approvals"))
+
+@app.post("/leave/<int:rid>/reject")
+@login_required
+def leave_reject(rid):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("leave_approvals"))
+    r = LeaveRequest.query.get_or_404(rid)
+    r.status = "rejected"
+    r.approved_by = current_user.id
+    db.session.commit()
+    flash("Rejected", "info")
+    return redirect(url_for("leave_approvals"))
+
+@app.post("/seed")
+@login_required
+def seed():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+    if Employee.query.count() == 0:
+        s = Shift.query.filter_by(name="Office").first()
+        for i in range(1, 6):
+            db.session.add(Employee(code=f"E{i:03d}", name=f"Employee {i}", email=f"user{i}@example.com", dept="OPS", shift_id=(s.id if s else None)))
+        db.session.commit()
+        flash("Seeded 5 employees", "success")
+    else:
+        flash("Employees already exist", "info")
+    return redirect(url_for("employees"))
+
+@app.route("/admin/offices", methods=["GET", "POST"])
+@login_required
+def offices_admin():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        if "create" in request.form:
+            db.session.add(Office(
+                name=request.form["name"],
+                lat=float(request.form["lat"]),
+                lon=float(request.form["lon"]),
+                radius_m=int(request.form["radius_m"]),
+                is_active=True
+            ))
+            db.session.commit()
+            flash("Office added", "success")
+
+        elif "set_active" in request.form:
+            Office.query.update({Office.is_active: False})
+            Office.query.filter_by(id=int(request.form["office_id"])).update({Office.is_active: True})
+            db.session.commit()
+            flash("Active office updated", "success")
+
+    offices = Office.query.order_by(Office.name.asc()).all()
+    active = Office.query.filter_by(is_active=True).first()
+    return render_template("office_admin.html", offices=offices, active=active)
+
+
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+    app.run(host="0.0.0.0", port=5000)
