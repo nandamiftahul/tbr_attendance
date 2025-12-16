@@ -1,80 +1,6 @@
-<!-- templates/approvals.html (REPLACE FULL) -->
 {% extends 'base.html' %}
 {% block title %}Approvals · Attendance{% endblock %}
 {% block content %}
-
-{% if current_user.role == 'admin' %}
-<div class="card" style="margin-bottom:20px;">
-  <h2>Approval Flow Settings</h2>
-
-  <form method="post" action="{{ url_for('approval_route_save') }}"
-        style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
-
-    <div>
-      <label>Stage</label>
-      <select name="stage" required>
-        <option value="manager">Manager</option>
-        <option value="hrd">HRD</option>
-      </select>
-    </div>
-
-    <div>
-      <label>Department</label>
-      <select name="dept">
-        <option value="">ALL (Global)</option>
-        {% for d in departments %}
-        <option value="{{ d }}">{{ d }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div>
-      <label>Approver User</label>
-      <select name="approver_user_id" required>
-        {% for u in users %}
-        <option value="{{ u.id }}">
-          {{ u.name }} — {{ u.role }}{% if u.employee and u.employee.dept %} ({{ u.employee.dept }}){% endif %}
-        </option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div style="align-self:end;">
-      <button class="btn" type="submit">Save Route</button>
-    </div>
-  </form>
-
-  <hr style="margin:15px 0;">
-
-  <h3>Active Approval Routes</h3>
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Stage</th>
-        <th>Department</th>
-        <th>Approver</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in routes %}
-      <tr>
-        <td>{{ r.stage|upper }}</td>
-        <td>{{ r.dept or 'ALL' }}</td>
-        <td>{{ r.approver.name }}</td>
-        <td>
-          <form method="post" action="{{ url_for('approval_route_delete', id=r.id) }}"
-                onsubmit="return confirm('Delete this route?')">
-            <button class="btn danger" type="submit">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
 
 <div class="card">
   <h2>Leave/Sick/WFH Approvals</h2>
@@ -83,60 +9,7 @@
   </p>
 </div>
 
-<div class="card" style="margin-top:12px;">
-  <div class="tablewrap">
-    <table class="table table-fixed">
-      <thead>
-        <tr>
-          <th class="col-id">ID</th>
-          <th class="col-emp">Employee</th>
-          <th class="col-type">Type</th>
-          <th class="col-dates">Dates</th>
-          <th class="col-status">Status</th>
-          <th class="col-reason">Reason</th>
-          <th class="col-actions">Actions</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td class="col-id">{{ r.id }}</td>
-
-          <td class="truncate col-emp" title="{{ r.employee.code }} — {{ r.employee.name }}">
-            {{ r.employee.code }} — {{ r.employee.name }}
-          </td>
-
-          <td class="col-type">
-            <span class="badge badge-{{ r.type }}">{{ r.type }}</span>
-          </td>
-
-          <td class="col-dates">
-            {{ r.start_date }} → {{ r.end_date }}
-          </td>
-
-          <td class="col-status">
-            <span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span>
-          </td>
-
-          <td class="truncate col-reason" title="{{ r.reason or '' }}">
-            {{ r.reason or '' }}
-          </td>
-
-          <td class="actions-cell col-actions">
-            {% if r.status in ['pending_manager','pending_hrd'] %}
-              <div class="actions-row">
-                <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
-                  <button class="btn" type="submit">✓ Approve</button>
-                </form>
-
-                <form method="post"
-                      action="{{ url_for('leave_reject', rid=r.id) }}"
-                      onsubmit="return confirm('Reject request #{{ r.id }} ({{ r.employee.code }} — {{ r.employee.name }})?');">
-                  <button class="btn btn-outline-danger" type="submit">✕ Reject</button>
-                </form>
-              </div>
-{% if current_user.role == 'admin' %}
+{% if (current_user.role or '')|lower == 'admin' %}
 <div class="card" style="margin-top:12px;">
   <h2 style="margin-bottom:6px;">Approval Flow Settings</h2>
   <p style="opacity:.85;margin-top:-6px;">
@@ -199,7 +72,13 @@
           <tr>
             <td>{{ rr.stage }}</td>
             <td>{{ rr.dept or '(global/default)' }}</td>
-            <td>{{ rr.approver_user.name }} — {{ rr.approver_user.email }} ({{ rr.approver_user.role }})</td>
+            <td>
+              {% if rr.approver_user is defined %}
+                {{ rr.approver_user.name }} — {{ rr.approver_user.email }} ({{ rr.approver_user.role }})
+              {% else %}
+                {{ rr.approver_user_id }}
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
           {% if not (routes or []) %}
@@ -212,6 +91,60 @@
 </div>
 {% endif %}
 
+
+<div class="card" style="margin-top:12px;">
+  <div class="tablewrap">
+    <table class="table table-fixed">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th class="col-emp">Employee</th>
+          <th class="col-type">Type</th>
+          <th class="col-dates">Dates</th>
+          <th class="col-status">Status</th>
+          <th class="col-reason">Reason</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="col-id">{{ r.id }}</td>
+
+          <td class="truncate col-emp" title="{{ r.employee.code }} — {{ r.employee.name }}">
+            {{ r.employee.code }} — {{ r.employee.name }}
+          </td>
+
+          <td class="col-type">
+            <span class="badge badge-{{ r.type }}">{{ r.type }}</span>
+          </td>
+
+          <td class="col-dates">
+            {{ r.start_date }} → {{ r.end_date }}
+          </td>
+
+          <td class="col-status">
+            <span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span>
+          </td>
+
+          <td class="truncate col-reason" title="{{ r.reason or '' }}">
+            {{ r.reason or '' }}
+          </td>
+
+          <td class="actions-cell col-actions">
+            {% if r.status in ['pending_manager','pending_hrd'] %}
+              <div class="actions-row">
+                <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
+                  <button class="btn" type="submit">✓ Approve</button>
+                </form>
+
+                <form method="post"
+                      action="{{ url_for('leave_reject', rid=r.id) }}"
+                      onsubmit="return confirm('Reject request #{{ r.id }} ({{ r.employee.code }} — {{ r.employee.name }})?');">
+                  <button class="btn btn-outline-danger" type="submit">✕ Reject</button>
+                </form>
+              </div>
             {% else %}
               <small style="opacity:.85;">manager_by {{ r.manager_approved_by or '-' }} · hrd_by {{ r.hrd_approved_by or '-' }}</small>
             {% endif %}
@@ -322,6 +255,7 @@
 .badge-leave{ background: rgba(0, 200, 255, 0.22); }
 .badge-sick{ background: rgba(255, 128, 128, 0.22); }
 .badge-wfh{ background: rgba(180, 120, 255, 0.22); }
+.badge-on_site{ background: rgba(255, 165, 0, 0.22); }
 
 /* reject style (muted outline) */
 .btn-outline-danger{
