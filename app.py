@@ -98,6 +98,16 @@ def approved_leave_for(emp_id: int, d: date):
         LeaveRequest.end_date >= d,
     ).first()
 
+def to_local_iso(dt):
+    if not dt:
+        return ""
+    tz = ZoneInfo(TZ)
+    # if dt naive, anggap UTC (paling aman di server UTC) lalu convert
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(tz).isoformat()
+
+
 # ✅ helper create/link user
 def create_user_for_employee(emp: Employee, login_email: str, password: str):
     login_email = (login_email or "").strip().lower()
@@ -384,7 +394,7 @@ def api_leave_my():
     } for r in rows]})
 
 
-# --- API: list my attendance records ---
+# --- API: list my attendance records (FULL REPLACE) ---
 @app.get("/api/attendance/my")
 @login_required
 def api_attendance_my():
@@ -392,25 +402,58 @@ def api_attendance_my():
     if not emp:
         return jsonify({"ok": False, "error": "No employee linked"}), 400
 
-    start = request.args.get("start")  # YYYY-MM-DD
-    end = request.args.get("end")      # YYYY-MM-DD
+    # ---- helpers ----
+    def parse_ymd(s: str):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    def to_local_iso(dt):
+        """
+        Return ISO8601 with timezone offset (+07:00 for Asia/Jakarta).
+        If DB stored naive datetime, assume it's UTC then convert to local.
+        """
+        if not dt:
+            return ""
+        tz_local = ZoneInfo(TZ)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(tz_local).isoformat()
+
+    # ---- query params ----
+    start_s = (request.args.get("start") or "").strip()  # YYYY-MM-DD
+    end_s = (request.args.get("end") or "").strip()      # YYYY-MM-DD
+
+    start_d = parse_ymd(start_s) if start_s else None
+    end_d = parse_ymd(end_s) if end_s else None
+
+    if start_s and not start_d:
+        return jsonify({"ok": False, "error": "Invalid start date (use YYYY-MM-DD)"}), 400
+    if end_s and not end_d:
+        return jsonify({"ok": False, "error": "Invalid end date (use YYYY-MM-DD)"}), 400
 
     q = Attendance.query.filter_by(employee_id=emp.id)
 
-    if start:
-        q = q.filter(Attendance.work_date >= start)
-    if end:
-        q = q.filter(Attendance.work_date <= end)
+    if start_d:
+        q = q.filter(Attendance.work_date >= start_d)
+    if end_d:
+        q = q.filter(Attendance.work_date <= end_d)
 
     rows = q.order_by(Attendance.work_date.desc()).limit(500).all()
-    return jsonify({"ok": True, "rows": [{
-        "date": r.work_date.isoformat(),
-        "check_in": r.check_in.isoformat(sep=" ") if r.check_in else "",
-        "check_out": r.check_out.isoformat(sep=" ") if r.check_out else "",
-        "hours": float(r.duration_hours or 0.0),
-        "status": r.status,
-        "note": r.note or "",
-    } for r in rows]})
+
+    return jsonify({
+        "ok": True,
+        "rows": [{
+            "date": r.work_date.isoformat(),
+            # ✅ return ISO with timezone offset for mobile correctness
+            "check_in": to_local_iso(r.check_in),
+            "check_out": to_local_iso(r.check_out),
+            "hours": float(r.duration_hours or 0.0),
+            "status": r.status,
+            "note": r.note or "",
+        } for r in rows]
+    })
 
 
 @app.route("/")
