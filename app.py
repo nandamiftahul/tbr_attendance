@@ -472,6 +472,167 @@ def api_attendance_my():
         } for r in rows]
     })
 
+# ---------------------------
+# API: approvals for mobile
+# ---------------------------
+
+def _leave_to_row(r: LeaveRequest):
+    # r.employee should exist via relationship (LeaveRequest -> Employee)
+    emp = getattr(r, "employee", None)
+    return {
+        "id": r.id,
+        "type": r.type,
+        "start_date": str(r.start_date),
+        "end_date": str(r.end_date),
+        "status": r.status,
+        "reason": r.reason or "",
+        "employee_id": r.employee_id,
+        "employee_name": (emp.name if emp else ""),
+        "dept": (emp.dept if emp else ""),
+        "manager_approved_by": getattr(r, "manager_approved_by", None),
+        "hrd_approved_by": getattr(r, "hrd_approved_by", None),
+    }
+
+
+def _mark_attendance_for_leave(r: LeaveRequest):
+    # Mark attendance for date range (same logic like web approve)
+    d = r.start_date
+    while d <= r.end_date:
+        a = Attendance.query.filter_by(employee_id=r.employee_id, work_date=d).first()
+        if not a:
+            a = Attendance(employee_id=r.employee_id, work_date=d)
+            db.session.add(a)
+        a.status = "wfh" if r.type == "wfh" else r.type
+        a.note = (a.note or "") + f" Marked by approval #{r.id}."
+        d += timedelta(days=1)
+
+
+def _my_dept():
+    me_emp = _employee_for_user(current_user)
+    return (me_emp.dept if me_emp else None)
+
+
+@app.get("/api/leave/approvals")
+@login_required
+def api_leave_approvals():
+    role = (current_user.role or "staff").lower()
+
+    # Staff: tidak ada approvals (biar tab kosong)
+    if role == "staff":
+        return jsonify({"ok": True, "rows": []})
+
+    # Manager: pending_manager untuk dept dia saja
+    if role == "manager":
+        dept = _my_dept()
+        if not dept:
+            return jsonify({"ok": True, "rows": []})
+        rows = (LeaveRequest.query
+                .join(Employee)
+                .filter(Employee.dept == dept)
+                .filter(LeaveRequest.status == "pending_manager")
+                .order_by(LeaveRequest.id.desc())
+                .all())
+        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
+
+    # General Manager: pending_manager semua dept
+    if role == "general_manager":
+        rows = (LeaveRequest.query
+                .filter(LeaveRequest.status == "pending_manager")
+                .order_by(LeaveRequest.id.desc())
+                .all())
+        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
+
+    # HRD: pending_hrd saja
+    if role == "hrd":
+        rows = (LeaveRequest.query
+                .filter(LeaveRequest.status == "pending_hrd")
+                .order_by(LeaveRequest.id.desc())
+                .all())
+        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
+
+    # Admin: lihat semua yang belum final (atau semua kalau mau)
+    if role == "admin":
+        rows = (LeaveRequest.query
+                .filter(LeaveRequest.status.in_(["pending_manager", "pending_hrd"]))
+                .order_by(LeaveRequest.id.desc())
+                .all())
+        return jsonify({"ok": True, "rows": [_leave_to_row(r) for r in rows]})
+
+    return jsonify({"ok": False, "error": "Not allowed"}), 403
+
+
+@app.post("/api/leave/<int:rid>/approve")
+@login_required
+def api_leave_approve(rid):
+    role = (current_user.role or "staff").lower()
+    r = LeaveRequest.query.get_or_404(rid)
+
+    # Manager stage
+    if role in ("manager", "general_manager"):
+        if r.status != "pending_manager":
+            return jsonify({"ok": False, "error": "Not pending manager approval"}), 409
+
+        if role == "manager":
+            dept = _my_dept()
+            if not dept or not r.employee or r.employee.dept != dept:
+                return jsonify({"ok": False, "error": "Not allowed (different department)"}), 403
+
+        r.status = "pending_hrd"
+        r.manager_approved_by = current_user.id
+        r.manager_approved_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({"ok": True, "status": r.status, "row": _leave_to_row(r)})
+
+    # HRD final stage (admin juga boleh final approve)
+    if role in ("hrd", "admin"):
+        if r.status not in ("pending_hrd", "pending_manager"):
+            return jsonify({"ok": False, "error": "Not pending HRD approval"}), 409
+
+        r.status = "approved"
+        r.hrd_approved_by = current_user.id
+        r.hrd_approved_at = datetime.utcnow()
+
+        _mark_attendance_for_leave(r)
+        db.session.commit()
+        return jsonify({"ok": True, "status": r.status, "row": _leave_to_row(r)})
+
+    return jsonify({"ok": False, "error": "Not allowed"}), 403
+
+
+@app.post("/api/leave/<int:rid>/reject")
+@login_required
+def api_leave_reject(rid):
+    role = (current_user.role or "staff").lower()
+    r = LeaveRequest.query.get_or_404(rid)
+
+    allowed = False
+
+    # Admin: boleh reject kapan saja
+    if role == "admin":
+        allowed = True
+
+    # Manager/GM: boleh reject hanya pending_manager
+    elif role in ("manager", "general_manager") and r.status == "pending_manager":
+        allowed = True
+        if role == "manager":
+            dept = _my_dept()
+            if not dept or not r.employee or r.employee.dept != dept:
+                allowed = False
+
+    # HRD: boleh reject hanya pending_hrd
+    elif role == "hrd" and r.status == "pending_hrd":
+        allowed = True
+
+    if not allowed:
+        return jsonify({"ok": False, "error": "Not allowed"}), 403
+
+    r.status = "rejected"
+    r.rejected_by = current_user.id
+    r.rejected_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"ok": True, "status": r.status, "row": _leave_to_row(r)})
+
+
 @app.route("/")
 @login_required
 def dashboard():
