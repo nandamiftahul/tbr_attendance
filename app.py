@@ -138,7 +138,7 @@ def initdb():
 @app.cli.command("mark-absent")
 def mark_absent():
     with app.app_context():
-        today = date.today()
+        today = datetime.now(ZoneInfo(TZ)).date()
         if is_holiday(today):
             print("Holiday today. Skipping absent marking.")
             return
@@ -282,7 +282,7 @@ def api_attendance_check():
     lon = float(lon) if lon is not None else None
 
     now = datetime.now(ZoneInfo(TZ))
-    today = date.today()
+    today = now.date()
 
     # optional geofence on check-in
     if action == "check_in" and not geofence_ok(lat, lon):
@@ -416,7 +416,7 @@ def api_attendance_my():
 @app.route("/")
 @login_required
 def dashboard():
-    today = date.today()
+    today = datetime.now(ZoneInfo(TZ)).date()
     recs = Attendance.query.filter_by(work_date=today).all()
     present = sum(1 for r in recs if r.status in ("present", "late", "wfh"))
     leave = sum(1 for r in recs if r.status == "leave")
@@ -599,7 +599,7 @@ def attendance_check_post():
     lat = float(lat) if lat else None
     lon = float(lon) if lon else None
     now = datetime.now(ZoneInfo(TZ))
-    today = date.today()
+    today = now.date()
     emp = Employee.query.get_or_404(emp_id)
 
     if action == "check_in" and not geofence_ok(lat, lon):
