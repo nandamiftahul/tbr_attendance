@@ -1260,23 +1260,8 @@ def leave_approvals():
 
     # admin (atau role lain apa pun) -> fallback aman
     rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
-    
-    depts = [d[0] for d in (
-        db.session.query(Employee.dept)
-        .filter(Employee.dept.isnot(None))
-        .distinct()
-        .order_by(Employee.dept.asc())
-        .all()
-    )]
-    
-    users = User.query.filter_by(is_active=True).order_by(User.name.asc()).all()
-    
-    routes = (ApprovalRoute.query.filter_by(is_active=True)
-              .order_by(ApprovalRoute.stage.asc(), ApprovalRoute.dept.asc().nullsfirst(), ApprovalRoute.priority.asc())
-              .all())
-    
-    return render_template("approvals.html", rows=rows, depts=depts, users=users, routes=routes)
-    
+    return render_template("approvals.html", rows=rows)
+
 
 @app.post("/approvals/routes/set")
 @login_required
