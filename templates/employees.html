@@ -13,11 +13,18 @@
 
 <div class="card" style="margin-top:12px;">
   <h3>Create Employee</h3>
-  <form method="post" action="{{ url_for('employee_create') }}" style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px;">
+  <form method="post" action="{{ url_for('employee_create') }}" style="display:grid; grid-template-columns: repeat(7, 1fr); gap:8px;">
     <input name="code" placeholder="Code (unique)" required>
     <input name="name" placeholder="Name" required>
     <input name="email" placeholder="Employee Email">
     <input name="dept" placeholder="Department">
+
+    <select name="role">
+      <option value="staff">staff</option>
+      <option value="manager">manager</option>
+      <option value="general_manager">general manager</option>
+      <option value="hrd">HRD</option>
+    </select>
 
     <select name="shift_id">
       <option value="">— shift (optional) —</option>
@@ -53,6 +60,7 @@
           <th style="width:170px;">Name</th>
           <th style="width:210px;">Employee Email</th>
           <th style="width:140px;">Dept</th>
+          <th style="width:140px;">Role</th>
           <th style="width:160px;">Shift</th>
           <th style="width:220px;">Login Username</th>
           <th style="width:90px;">Active</th>
@@ -66,6 +74,7 @@
           <td>{{ r.name }}</td>
           <td title="{{ r.email or '' }}">{{ r.email or '' }}</td>
           <td>{{ r.dept or '' }}</td>
+          <td>{{ r.role or (r.user.role if r.user else '') }}</td>
           <td>{{ r.shift.name if r.shift else '' }}</td>
           <td title="{{ r.user.email if r.user else '' }}">{{ r.user.email if r.user else '' }}</td>
           <td>{{ 'Yes' if r.is_active else 'No' }}</td>
@@ -79,6 +88,7 @@
               data-name="{{ r.name|e }}"
               data-email="{{ (r.email or '')|e }}"
               data-dept="{{ (r.dept or '')|e }}"
+              data-role="{{ (r.role or (r.user.role if r.user else 'staff'))|e }}"
               data-shift="{{ (r.shift_id or '') }}"
               data-active="{{ '1' if r.is_active else '0' }}"
               data-login="{{ (r.user.email if r.user else '')|e }}"
@@ -116,6 +126,14 @@
 
       <label>Department</label>
       <input name="dept" id="e_dept">
+
+      <label>Role</label>
+      <select name="role" id="e_role">
+        <option value="staff">staff</option>
+        <option value="manager">manager</option>
+        <option value="general_manager">general manager</option>
+        <option value="hrd">HRD</option>
+      </select>
 
       <label>Shift</label>
       <select name="shift_id" id="e_shift">
@@ -210,6 +228,7 @@ function toggleCreateInModal(){
       document.getElementById('e_name').value = btn.dataset.name || '';
       document.getElementById('e_email').value = btn.dataset.email || '';
       document.getElementById('e_dept').value = btn.dataset.dept || '';
+      document.getElementById('e_role').value = btn.dataset.role || 'staff';
       document.getElementById('e_shift').value = btn.dataset.shift || '';
       document.getElementById('e_active').checked = (btn.dataset.active === '1');
 

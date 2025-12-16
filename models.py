@@ -1,10 +1,18 @@
 # models.py (REPLACE FULL)
-from datetime import date, datetime, time
+from datetime import date, datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+# Roles used by this app:
+# - admin: superuser (full access)
+# - staff: normal employee
+# - manager: approves staff leave for their department
+# - general_manager: (reserved/optional) can act as manager-level approver if you want later
+# - hrd: final approver
+VALID_ROLES = ("admin", "staff", "manager", "general_manager", "hrd")
 
 
 class User(UserMixin, db.Model):
@@ -13,7 +21,7 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), default="staff")  # admin/staff
+    role = db.Column(db.String(20), default="staff")  # admin/staff/manager/general_manager/hrd
     is_active = db.Column(db.Boolean, default=True)
 
     def set_password(self, pw: str):
@@ -40,10 +48,11 @@ class Employee(db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), unique=True)
     dept = db.Column(db.String(80))
+    role = db.Column(db.String(20), default="staff")  # staff/manager/general_manager/hrd (UI)
     is_active = db.Column(db.Boolean, default=True)
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
-    # ✅ THIS is what you were missing (so template can do r.user.email)
+    # so template can do r.user.email
     user = db.relationship("User", backref=db.backref("employee", uselist=False))
 
     shift_id = db.Column(db.Integer, db.ForeignKey("shifts.id"))
@@ -65,8 +74,20 @@ class LeaveRequest(db.Model):
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     reason = db.Column(db.String(255))
-    status = db.Column(db.String(20), default="pending")  # pending/approved/rejected
-    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+
+    # Flow:
+    # staff -> pending_manager -> pending_hrd -> approved
+    status = db.Column(db.String(30), default="pending_manager")  # pending_manager/pending_hrd/approved/rejected
+
+    # Approval trail
+    manager_approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    manager_approved_at = db.Column(db.DateTime)
+    hrd_approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    hrd_approved_at = db.Column(db.DateTime)
+
+    rejected_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    rejected_at = db.Column(db.DateTime)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -103,6 +124,7 @@ class Attendance(db.Model):
             seconds = (self.check_out - self.check_in).total_seconds()
             return round(seconds / 3600.0, 2)
         return 0.0
+
 
 class Office(db.Model):
     __tablename__ = "offices"

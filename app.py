@@ -109,7 +109,7 @@ def to_local_iso(dt):
 
 
 # ✅ helper create/link user
-def create_user_for_employee(emp: Employee, login_email: str, password: str):
+def create_user_for_employee(emp: Employee, login_email: str, password: str, role: str = "staff"):
     login_email = (login_email or "").strip().lower()
     if not login_email:
         raise ValueError("Login email/username is required.")
@@ -118,11 +118,17 @@ def create_user_for_employee(emp: Employee, login_email: str, password: str):
     if User.query.filter_by(email=login_email).first():
         raise ValueError("Login email already exists.")
 
-    u = User(name=emp.name, email=login_email, role="staff", is_active=True)
+    # Normalize role
+    role = (role or "staff").strip().lower()
+    if role not in ("admin", "staff", "manager", "general_manager", "hrd"):
+        role = "staff"
+
+    u = User(name=emp.name, email=login_email, role=role, is_active=True)
     u.set_password(password)
     db.session.add(u)
     db.session.flush()  # get u.id
     emp.user_id = u.id
+
 
 @app.cli.command("initdb")
 def initdb():
@@ -354,14 +360,23 @@ def api_leave_request():
     if end_date < start_date:
         return jsonify({"ok": False, "error": "End date must be >= start date"}), 400
 
+    # Determine initial status based on requester role
+    req_role = (current_user.role or "staff").lower()
+    if req_role in ("admin", "hrd"):
+        init_status = "approved"
+    elif req_role in ("manager", "general_manager"):
+        # manager's own request goes directly to HRD
+        init_status = "pending_hrd"
+    else:
+        init_status = "pending_manager"
+
     r = LeaveRequest(
         employee_id=emp.id,
         type=req_type,
         start_date=start_date,
         end_date=end_date,
         reason=reason,
-        status="pending",
-        approved_by=None,
+        status=init_status,
     )
 
     db.session.add(r)
@@ -496,6 +511,7 @@ def employee_create():
         name=request.form.get("name"),
         email=request.form.get("email"),
         dept=request.form.get("dept"),
+        role=(request.form.get("role") or "staff").strip().lower(),
         shift_id=(int(shift_id) if shift_id else None),
         is_active=True,
     )
@@ -506,8 +522,9 @@ def employee_create():
     if request.form.get("create_login") == "1":
         login_email = request.form.get("login_email")
         login_password = request.form.get("login_password")
+        login_role = (request.form.get("role") or emp.role or "staff").strip().lower()
         try:
-            create_user_for_employee(emp, login_email, login_password)
+            create_user_for_employee(emp, login_email, login_password, role=login_role)
             flash(f"Login created: {login_email}", "info")
         except Exception as e:
             db.session.rollback()
@@ -530,6 +547,7 @@ def employee_update(emp_id):
     emp.name = request.form.get("name")
     emp.email = request.form.get("email")
     emp.dept = request.form.get("dept")
+    emp.role = (request.form.get("role") or emp.role or "staff").strip().lower()
     emp.is_active = bool(request.form.get("is_active"))
 
     shift_id = request.form.get("shift_id")
@@ -549,6 +567,7 @@ def employee_update(emp_id):
                         raise ValueError("Login email already exists.")
                     u.email = login_email
                 u.name = emp.name
+                u.role = emp.role or u.role
                 u.is_active = emp.is_active
 
                 if reset_pw:
@@ -562,7 +581,7 @@ def employee_update(emp_id):
                     raise ValueError("Login email is required.")
                 if not new_pw:
                     raise ValueError("Password is required.")
-                create_user_for_employee(emp, login_email, new_pw)
+                create_user_for_employee(emp, login_email, new_pw, role=(emp.role or 'staff'))
 
         db.session.commit()
         flash("Employee updated", "success")
@@ -873,58 +892,179 @@ def leave_request_submit():
     start_date = datetime.strptime(request.form.get("start_date"), "%Y-%m-%d").date()
     end_date = datetime.strptime(request.form.get("end_date"), "%Y-%m-%d").date()
     reason = request.form.get("reason")
-    lr = LeaveRequest(employee_id=emp_id, type=typ, start_date=start_date, end_date=end_date, reason=reason, status="pending")
+
+    # Initial status: staff -> pending_manager, manager -> pending_hrd, hrd/admin -> approved
+    role = (current_user.role or "staff").lower()
+    if role in ("admin", "hrd"):
+        init_status = "approved"
+    elif role in ("manager", "general_manager"):
+        init_status = "pending_hrd"
+    else:
+        init_status = "pending_manager"
+
+    lr = LeaveRequest(
+        employee_id=emp_id,
+        type=typ,
+        start_date=start_date,
+        end_date=end_date,
+        reason=reason,
+        status=init_status
+    )
     db.session.add(lr)
     db.session.commit()
+
+    # If created as approved (HRD/admin submitting), also mark attendance right away
+    if init_status == "approved":
+        lr.hrd_approved_by = current_user.id
+        lr.hrd_approved_at = datetime.utcnow()
+
+        d = lr.start_date
+        while d <= lr.end_date:
+            a = Attendance.query.filter_by(employee_id=lr.employee_id, work_date=d).first()
+            if not a:
+                a = Attendance(employee_id=lr.employee_id, work_date=d)
+                db.session.add(a)
+            a.status = "wfh" if lr.type == "wfh" else lr.type
+            a.note = (a.note or "") + f" Marked by approval #{lr.id}."
+            d += timedelta(days=1)
+
+        db.session.commit()
+
     flash("Request submitted", "success")
     return redirect(url_for("leave_request_form"))
 
 @app.get("/leave/approvals")
 @login_required
 def leave_approvals():
-    if current_user.role != "admin":
-        flash("Admins only", "warning")
-        return redirect(url_for("dashboard"))
+    role = (current_user.role or "staff").lower()
+
+    # staff can still open the page, but it will only show their own requests
+    if role == "staff":
+        emp = _employee_for_user(current_user)
+        if not emp:
+            rows = []
+        else:
+            rows = LeaveRequest.query.filter_by(employee_id=emp.id).order_by(LeaveRequest.created_at.desc()).all()
+        return render_template("approvals.html", rows=rows)
+
+    # manager: only pending_manager for their department
+    if role == "manager":
+        me_emp = _employee_for_user(current_user)
+        if not me_emp or not me_emp.dept:
+            rows = []
+        else:
+            rows = (LeaveRequest.query
+                    .join(Employee)
+                    .filter(Employee.dept == me_emp.dept)
+                    .filter(LeaveRequest.status == "pending_manager")
+                    .order_by(LeaveRequest.created_at.desc())
+                    .all())
+        return render_template("approvals.html", rows=rows)
+
+    # general manager: can see all pending_manager
+    if role == "general_manager":
+        rows = LeaveRequest.query.filter(LeaveRequest.status == "pending_manager").order_by(LeaveRequest.created_at.desc()).all()
+        return render_template("approvals.html", rows=rows)
+
+    # HRD: only pending_hrd
+    if role == "hrd":
+        rows = LeaveRequest.query.filter(LeaveRequest.status == "pending_hrd").order_by(LeaveRequest.created_at.desc()).all()
+        return render_template("approvals.html", rows=rows)
+
+    # admin: see all
     rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
     return render_template("approvals.html", rows=rows)
+
 
 @app.post("/leave/<int:rid>/approve")
 @login_required
 def leave_approve(rid):
-    if current_user.role != "admin":
-        flash("Admins only", "warning")
-        return redirect(url_for("leave_approvals"))
+    role = (current_user.role or "staff").lower()
     r = LeaveRequest.query.get_or_404(rid)
-    r.status = "approved"
-    r.approved_by = current_user.id
-    db.session.commit()
 
-    d = r.start_date
-    while d <= r.end_date:
-        a = Attendance.query.filter_by(employee_id=r.employee_id, work_date=d).first()
-        if not a:
-            a = Attendance(employee_id=r.employee_id, work_date=d)
-            db.session.add(a)
-        a.status = "wfh" if r.type == "wfh" else r.type
-        a.note = (a.note or "") + f" Marked by approval #{r.id}."
-        d += timedelta(days=1)
+    # Manager stage
+    if role in ("manager", "general_manager"):
+        me_emp = _employee_for_user(current_user)
+        if role == "manager":
+            # manager only for same dept
+            if not me_emp or not me_emp.dept or r.employee.dept != me_emp.dept:
+                flash("Not allowed (different department).", "danger")
+                return redirect(url_for("leave_approvals"))
 
-    db.session.commit()
-    flash("Approved", "success")
-    return redirect(url_for("leave_approvals"))
+        if r.status != "pending_manager":
+            flash("Request is not waiting for manager approval.", "warning")
+            return redirect(url_for("leave_approvals"))
+
+        r.status = "pending_hrd"
+        r.manager_approved_by = current_user.id
+        r.manager_approved_at = datetime.utcnow()
+        db.session.commit()
+        flash("Approved (forwarded to HRD).", "success")
+        return redirect(url_for("leave_approvals"))
+
+    # HRD stage (final approve)
+    if role in ("hrd", "admin"):
+        if r.status not in ("pending_hrd", "pending_manager"):
+            flash("Request is not waiting for HRD approval.", "warning")
+            return redirect(url_for("leave_approvals"))
+
+        # If admin approves directly from pending_manager, treat as HRD final approve
+        r.status = "approved"
+        r.hrd_approved_by = current_user.id
+        r.hrd_approved_at = datetime.utcnow()
+        db.session.commit()
+
+        # Mark attendance for date range
+        d = r.start_date
+        while d <= r.end_date:
+            a = Attendance.query.filter_by(employee_id=r.employee_id, work_date=d).first()
+            if not a:
+                a = Attendance(employee_id=r.employee_id, work_date=d)
+                db.session.add(a)
+            a.status = "wfh" if r.type == "wfh" else r.type
+            a.note = (a.note or "") + f" Marked by approval #{r.id}."
+            d += timedelta(days=1)
+
+        db.session.commit()
+        flash("Approved (final).", "success")
+        return redirect(url_for("leave_approvals"))
+
+    flash("Not allowed.", "danger")
+    return redirect(url_for("dashboard"))
+
 
 @app.post("/leave/<int:rid>/reject")
 @login_required
 def leave_reject(rid):
-    if current_user.role != "admin":
-        flash("Admins only", "warning")
-        return redirect(url_for("leave_approvals"))
+    role = (current_user.role or "staff").lower()
     r = LeaveRequest.query.get_or_404(rid)
+
+    # Who can reject:
+    # - manager/general_manager can reject pending_manager
+    # - hrd/admin can reject pending_hrd (and admin can reject anything)
+    allowed = False
+    if role == "admin":
+        allowed = True
+    elif role in ("manager", "general_manager") and r.status == "pending_manager":
+        allowed = True
+        if role == "manager":
+            me_emp = _employee_for_user(current_user)
+            if not me_emp or not me_emp.dept or r.employee.dept != me_emp.dept:
+                allowed = False
+    elif role == "hrd" and r.status == "pending_hrd":
+        allowed = True
+
+    if not allowed:
+        flash("Not allowed to reject this request.", "danger")
+        return redirect(url_for("leave_approvals"))
+
     r.status = "rejected"
-    r.approved_by = current_user.id
+    r.rejected_by = current_user.id
+    r.rejected_at = datetime.utcnow()
     db.session.commit()
-    flash("Rejected", "info")
+    flash("Rejected.", "info")
     return redirect(url_for("leave_approvals"))
+
 
 @app.post("/seed")
 @login_required
