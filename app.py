@@ -1219,48 +1219,16 @@ def leave_request_submit():
 @app.get("/leave/approvals")
 @login_required
 def leave_approvals():
-    role = ((current_user.role or "staff").strip().lower())
+    role = (current_user.role or "staff").lower()
 
-    # default rows
-    rows = []
-
+    # staff can still open the page, but it will only show their own requests
     if role == "staff":
         emp = _employee_for_user(current_user)
-        if emp:
-            rows = (LeaveRequest.query
-                    .filter_by(employee_id=emp.id)
-                    .order_by(LeaveRequest.created_at.desc())
-                    .all())
+        if not emp:
+            rows = []
+        else:
+            rows = LeaveRequest.query.filter_by(employee_id=emp.id).order_by(LeaveRequest.created_at.desc()).all()
         return render_template("approvals.html", rows=rows)
-
-    if role == "manager":
-        me_emp = _employee_for_user(current_user)
-        if me_emp and me_emp.dept:
-            rows = (LeaveRequest.query
-                    .join(Employee)
-                    .filter(Employee.dept == me_emp.dept)
-                    .filter(LeaveRequest.status == "pending_manager")
-                    .order_by(LeaveRequest.created_at.desc())
-                    .all())
-        return render_template("approvals.html", rows=rows)
-
-    if role == "general_manager":
-        rows = (LeaveRequest.query
-                .filter(LeaveRequest.status == "pending_manager")
-                .order_by(LeaveRequest.created_at.desc())
-                .all())
-        return render_template("approvals.html", rows=rows)
-
-    if role == "hrd":
-        rows = (LeaveRequest.query
-                .filter(LeaveRequest.status == "pending_hrd")
-                .order_by(LeaveRequest.created_at.desc())
-                .all())
-        return render_template("approvals.html", rows=rows)
-
-    # admin (atau role lain apa pun) -> fallback aman
-    rows = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).all()
-    return render_template("approvals.html", rows=rows)
 
 
 @app.post("/approvals/routes/set")
