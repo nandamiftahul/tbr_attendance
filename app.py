@@ -472,6 +472,42 @@ def api_attendance_my():
         } for r in rows]
     })
 
+
+# --- API: holidays (for Records calendar) ---
+@app.get("/api/holidays")
+@login_required
+def api_holidays():
+    """
+    Return holiday list in a date range.
+    Query: /api/holidays?start=YYYY-MM-DD&end=YYYY-MM-DD
+    """
+    start_s = (request.args.get("start") or "").strip()
+    end_s = (request.args.get("end") or "").strip()
+
+    def parse_ymd(s: str):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    start_d = parse_ymd(start_s) if start_s else None
+    end_d = parse_ymd(end_s) if end_s else None
+    if not start_d or not end_d:
+        return jsonify({"ok": False, "error": "start/end required (YYYY-MM-DD)"}), 400
+    if end_d < start_d:
+        return jsonify({"ok": False, "error": "end must be >= start"}), 400
+
+    rows = (Holiday.query
+            .filter(Holiday.date >= start_d, Holiday.date <= end_d)
+            .order_by(Holiday.date.asc())
+            .all())
+
+    return jsonify({
+        "ok": True,
+        "rows": [{"date": h.date.isoformat(), "name": h.name} for h in rows]
+    })
+
+
 # ---------------------------
 # API: approvals for mobile
 # ---------------------------

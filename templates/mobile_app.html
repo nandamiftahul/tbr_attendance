@@ -164,6 +164,8 @@
     .b-late{border-color:rgba(242,140,40,.55); color:var(--orange); background: rgba(242,140,40,.14)}
     .b-absent{border-color:rgba(255,82,82,.5); color:var(--danger); background: rgba(255,82,82,.12)}
     .b-other{border-color:rgba(130,200,255,.45); color:#82c8ff; background: rgba(130,200,255,.12)}
+    .b-weekend{border-color:rgba(255,255,255,.22); color:rgba(255,255,255,.75); background: rgba(255,255,255,.08)}
+    .b-holiday{border-color:rgba(255,82,82,.55); color:var(--danger); background: rgba(255,82,82,.14)}
 
     .dayrow{
       display:flex; gap:12px;
@@ -426,6 +428,16 @@
     return JSON.parse(text);
   }
 
+
+  function esc(s){
+    return String(s ?? "")
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#39;");
+  }
+
   // ---------- API ----------
   const api = {
     baseUrl: localStorage.getItem("base_url") || "", // "" = same origin
@@ -448,7 +460,12 @@
     logout(){ return this.req("/api/logout",{method:"POST"}); },
     me(){ return this.req("/api/me"); },
     checkAttendance(action, lat, lon){ return this.req("/api/attendance/check",{method:"POST", body:{action, lat, lon}}); },
-    myAttendance(start, end){ return this.req("/api/attendance/my?start="+encodeURIComponent(start)+"&end="+encodeURIComponent(end)); },
+    myAttendance(start, end){ 
+      return this.req("/api/attendance/my?start="+encodeURIComponent(start)+"&end="+encodeURIComponent(end)); 
+    },
+    holidays(start, end){
+      return this.req("/api/holidays?start="+encodeURIComponent(start)+"&end="+encodeURIComponent(end));
+    },
     requestLeave(type, start_date, end_date, reason){ return this.req("/api/leave/request",{method:"POST", body:{type, start_date, end_date, reason}}); },
     myLeave(){ return this.req("/api/leave/my"); },
     approvals(){ return this.req("/api/leave/approvals"); },
@@ -456,6 +473,7 @@
     reject(id){ return this.req(`/api/leave/${id}/reject`,{method:"POST"}); },
     changePassword(old_password, new_password){ return this.req("/api/profile/change_password",{method:"POST", body:{old_password, new_password}}); },
   };
+
 
   // ---------- state ----------
   let me = null;
@@ -664,6 +682,13 @@
       const map = {};
       rows.forEach(r=>{ if(r.date) map[r.date]=r; });
 
+      // holidays in this month (admin-defined)
+      const hj = await api.holidays(ymd(start), ymd(end));
+      const hmap = {};
+      (hj.rows || []).forEach(h=>{
+        if(h.date) hmap[h.date] = h.name || "Holiday";
+      });
+
       const daysInMonth = end.getDate();
       for(let d=1; d<=daysInMonth; d++){
         const date = new Date(month.getFullYear(), month.getMonth(), d);
@@ -671,6 +696,9 @@
         const dayName = idDays[weekday];
         const key = ymd(date);
         const rec = map[key] || null;
+
+        const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+        const holidayName = hmap[key] || "";
 
         const status = rec ? (rec.status||"") : "";
         const note = rec ? (rec.note||"") : "";
@@ -687,6 +715,8 @@
             <div class="line">
               <div style="font-weight:900; color:rgba(255,255,255,.86)">${dayName}</div>
               ${rec ? badgeForStatus(status) : ""}
+              ${holidayName ? `<span class="badge b-holiday" title="${esc(holidayName)}">HOLIDAY</span>` : ``}
+              ${isWeekend ? `<span class="badge b-weekend">WEEKEND</span>` : ``}
             </div>
             <div style="height:6px"></div>
             <div class="line">
