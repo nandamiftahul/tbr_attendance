@@ -354,7 +354,7 @@ def api_leave_request():
     except Exception:
         return jsonify({"ok": False, "error": "Invalid date format"}), 400
 
-    if req_type not in ("leave", "sick", "wfh"):
+    if req_type not in ("leave", "sick", "wfh", "on_site"):
         return jsonify({"ok": False, "error": "Invalid type"}), 400
 
     if end_date < start_date:
@@ -495,14 +495,20 @@ def _leave_to_row(r: LeaveRequest):
 
 
 def _mark_attendance_for_leave(r: LeaveRequest):
-    # Mark attendance for date range (same logic like web approve)
     d = r.start_date
     while d <= r.end_date:
         a = Attendance.query.filter_by(employee_id=r.employee_id, work_date=d).first()
         if not a:
             a = Attendance(employee_id=r.employee_id, work_date=d)
             db.session.add(a)
-        a.status = "wfh" if r.type == "wfh" else r.type
+
+        if r.type == "wfh":
+            a.status = "wfh"
+        elif r.type == "on_site":
+            a.status = "on_site"
+        else:
+            a.status = r.type  # leave / sick
+
         a.note = (a.note or "") + f" Marked by approval #{r.id}."
         d += timedelta(days=1)
 
@@ -638,7 +644,7 @@ def api_leave_reject(rid):
 def dashboard():
     today = datetime.now(ZoneInfo(TZ)).date()
     recs = Attendance.query.filter_by(work_date=today).all()
-    present = sum(1 for r in recs if r.status in ("present", "late", "wfh"))
+    present = sum(1 for r in recs if r.status in ("present", "late", "wfh", "on_site"))
     leave = sum(1 for r in recs if r.status == "leave")
     sick = sum(1 for r in recs if r.status == "sick")
     wfh = sum(1 for r in recs if r.status == "wfh")

@@ -70,7 +70,7 @@ class LeaveRequest(db.Model):
     __tablename__ = "leave_requests"
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
-    type = db.Column(db.String(20), nullable=False)  # leave/sick/wfh
+    type = db.Column(db.String(20), nullable=False)  # leave/sick/wfh/on_site
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     reason = db.Column(db.String(255))
@@ -103,7 +103,7 @@ class Attendance(db.Model):
     check_in = db.Column(db.DateTime)
     check_out = db.Column(db.DateTime)
 
-    status = db.Column(db.String(20), default="present")  # present/late/leave/sick/wfh/absent
+    status = db.Column(db.String(20), default="present")  # present/late/leave/sick/wfh/absent/on_site
     note = db.Column(db.String(255))
 
     check_in_ip = db.Column(db.String(64))
