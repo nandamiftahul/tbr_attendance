@@ -6,3 +6,5 @@ Flask-SQLAlchemy
 python-dotenv
 Werkzeug
 openpyxl
+psycopg[binary]
+
