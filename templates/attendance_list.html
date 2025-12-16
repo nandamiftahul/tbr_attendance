@@ -54,13 +54,13 @@
           <td class="truncate" title="{{ r.employee.dept or '' }}">{{ r.employee.dept or '' }}</td>
 
           <td>
-            <div class="dt">{{ r.check_in.strftime('%Y-%m-%d %H:%M:%S') if r.check_in else '' }}</div>
+            <div class="dt">{{ r.check_in_local_str }}</div>
             <div class="meta">IP: {{ r.check_in_ip or '' }}</div>
             <div class="meta truncate" title="{{ r.check_in_ua or '' }}">UA: {{ r.check_in_ua or '' }}</div>
           </td>
 
           <td>
-            <div class="dt">{{ r.check_out.strftime('%Y-%m-%d %H:%M:%S') if r.check_out else '' }}</div>
+            <div class="dt">{{ r.check_out_local_str }}</div>
             <div class="meta">IP: {{ r.check_out_ip or '' }}</div>
             <div class="meta truncate" title="{{ r.check_out_ua or '' }}">UA: {{ r.check_out_ua or '' }}</div>
           </td>
