@@ -201,10 +201,14 @@
     <!-- LOGIN -->
     <div id="viewLogin">
       <div class="card">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
-          <div style="font-weight:1000; font-size:22px;">Attendance</div>
-          <span class="pill" id="baseUrlLabel"></span>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:10px; margin-bottom:12px;">
+          <img src="{{ url_for('static', filename='icon.png') }}" alt="Logo" style="height:90px; width:auto; display:block;">
+          <div style="display:flex; align-items:center; gap:10px; width:100%; justify-content:center; flex-wrap:wrap;">
+            <div style="font-weight:1000; font-size:22px;">Attendance</div>
+            <span class="pill" id="baseUrlLabel"></span>
+          </div>
         </div>
+
 
         <div class="col">
           <div>
