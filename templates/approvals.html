@@ -6,7 +6,7 @@
 <div class="card">
   <h2>Leave/Sick/WFH Approvals</h2>
   <p style="opacity:.85;margin-top:-6px;">
-    Approve and Reject are shown side-by-side. ID/Type/Status are compact to fit nicely.
+    Approve and Reject are shown side-by-side.
   </p>
 </div>
 
@@ -15,42 +15,35 @@
     <table class="table table-fixed">
       <thead>
         <tr>
-          <th class="col-id">ID</th>
-          <th class="col-emp">Employee</th>
-          <th class="col-type">Type</th>
-          <th class="col-dates">Dates</th>
-          <th class="col-status">Status</th>
-          <th class="col-reason">Reason</th>
-          <th class="col-actions">Actions</th>
+          <th style="min-width:70px;">ID</th>
+          <th style="min-width:240px;">Employee</th>
+          <th style="min-width:120px;">Type</th>
+          <th style="min-width:210px;">Dates</th>
+          <th style="min-width:120px;">Status</th>
+          <th style="min-width:260px;">Reason</th>
+          <!-- IMPORTANT: give Actions enough width -->
+          <th style="min-width:260px;">Actions</th>
         </tr>
       </thead>
 
       <tbody>
         {% for r in rows %}
         <tr>
-          <td class="col-id">{{ r.id }}</td>
+          <td>{{ r.id }}</td>
 
-          <td class="truncate col-emp" title="{{ r.employee.code }} — {{ r.employee.name }}">
+          <td class="truncate" title="{{ r.employee.code }} — {{ r.employee.name }}">
             {{ r.employee.code }} — {{ r.employee.name }}
           </td>
 
-          <td class="col-type">
-            <span class="badge badge-{{ r.type }}">{{ r.type }}</span>
-          </td>
+          <td><span class="badge badge-{{ r.type }}">{{ r.type }}</span></td>
 
-          <td class="col-dates">
-            {{ r.start_date }} → {{ r.end_date }}
-          </td>
+          <td>{{ r.start_date }} → {{ r.end_date }}</td>
 
-          <td class="col-status">
-            <span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span>
-          </td>
+          <td><span class="badge badge-status badge-{{ r.status }}">{{ r.status }}</span></td>
 
-          <td class="truncate col-reason" title="{{ r.reason or '' }}">
-            {{ r.reason or '' }}
-          </td>
+          <td class="truncate" title="{{ r.reason or '' }}">{{ r.reason or '' }}</td>
 
-          <td class="actions-cell col-actions">
+          <td class="actions-cell">
             {% if r.status == 'pending' %}
               <div class="actions-row">
                 <form method="post" action="{{ url_for('leave_approve', rid=r.id) }}">
@@ -67,6 +60,7 @@
               <small style="opacity:.85;">by {{ r.approved_by or '-' }}</small>
             {% endif %}
           </td>
+
         </tr>
         {% endfor %}
       </tbody>
@@ -88,53 +82,16 @@
 }
 
 /* ensure table wide enough so actions not clipped */
-.table-fixed{
-  min-width: 1100px;
-}
+.table-fixed{ min-width: 1200px; }
 
-/* base cell look */
+/* IMPORTANT: prevent cell from hiding content */
 .table-fixed td, .table-fixed th{
   vertical-align: top;
   color: rgba(255,255,255,0.92);
-  white-space: nowrap; /* keep header/cells tidy */
 }
-.table-fixed th{
-  font-weight: 700;
-}
-
-/* column sizing (compact for ID/Type/Status) */
-.col-id{
-  width: 60px;
-  text-align: center;
-}
-.col-type{
-  width: 95px;
-  text-align: center;
-}
-.col-status{
-  width: 110px;
-  text-align: center;
-}
-.col-actions{
-  width: 240px;
-}
-.col-emp{
-  min-width: 230px;
-}
-.col-dates{
-  min-width: 200px;
-}
-.col-reason{
-  min-width: 260px;
-}
-
-/* IMPORTANT: prevent actions cell from clipping */
 .actions-cell{
   overflow: visible !important;
-  text-overflow: clip !important;
-}
-.actions-cell *{
-  text-overflow: clip !important;
+  white-space: nowrap;
 }
 
 /* action buttons side-by-side */
@@ -145,12 +102,12 @@
 }
 .actions-row form{ margin:0; }
 
-/* truncate long cells */
+/* truncate */
 .truncate{
+  max-width: 380px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 380px;
 }
 
 /* badges */
@@ -162,13 +119,13 @@
   line-height: 1.4;
   background: rgba(255,255,255,0.12);
 }
-.badge-status.badge-pending{ background: rgba(255, 215, 0, 0.22); }
-.badge-status.badge-approved{ background: rgba(0, 255, 170, 0.22); }
-.badge-status.badge-rejected{ background: rgba(255, 128, 128, 0.22); }
+.badge-status.badge-pending{ background: rgba(255, 215, 0, 0.20); }
+.badge-status.badge-approved{ background: rgba(0, 255, 170, 0.20); }
+.badge-status.badge-rejected{ background: rgba(255, 128, 128, 0.20); }
 
-.badge-leave{ background: rgba(0, 200, 255, 0.22); }
-.badge-sick{ background: rgba(255, 128, 128, 0.22); }
-.badge-wfh{ background: rgba(180, 120, 255, 0.22); }
+.badge-leave{ background: rgba(0, 200, 255, 0.20); }
+.badge-sick{ background: rgba(255, 128, 128, 0.20); }
+.badge-wfh{ background: rgba(180, 120, 255, 0.20); }
 
 /* reject style (muted outline) */
 .btn-outline-danger{
