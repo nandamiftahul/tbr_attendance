@@ -358,7 +358,37 @@
           <div class="msg" id="pwMsg" style="display:none"></div>
         </div>
       </div>
+      
+      <div style="height:14px"></div>
 
+      <div class="card">
+        <div class="h2" style="font-size:16px;">Edit Profile</div>
+        <div class="col">
+          <div>
+            <label>Nomor HP</label>
+            <input class="inp" id="pfPhone" placeholder="08xxxxxxxxxx"/>
+          </div>
+          <div>
+            <label>Alamat</label>
+            <input class="inp" id="pfAddress" placeholder="Alamat lengkap"/>
+          </div>
+          <div class="row">
+            <div class="grow">
+              <label>Tanggal Lahir</label>
+              <input class="inp" id="pfBirthDate" type="date"/>
+            </div>
+            <div class="grow">
+              <label>Nomor KTP</label>
+              <input class="inp" id="pfKtp" placeholder="16 digit (opsional)"/>
+            </div>
+          </div>
+    
+          <button class="btn" id="btnSaveProfile">Save</button>
+          <div class="progress" id="pfProg" style="display:none"><div class="bar"></div></div>
+          <div class="msg" id="pfMsg" style="display:none"></div>
+        </div>
+      </div>
+    
       <div style="height:14px"></div>
 
       <button class="btn" id="btnLogout">Logout</button>
@@ -485,6 +515,7 @@
     reject(id){ return this.req(`/api/leave/${id}/reject`,{method:"POST"}); },
     changePassword(old_password, new_password){ return this.req("/api/profile/change_password",{method:"POST", body:{old_password, new_password}}); },
     announcements(){ return this.req("/api/announcements/active"); },
+    updateProfile(payload){ return this.req("/api/profile/update",{method:"POST", body: payload}); },
   };
 
 
@@ -881,6 +912,11 @@
       ` : ``}
     `;
     $("profileBox").innerHTML = html;
+    // fill edit form from employee
+    $("pfPhone").value = emp?.phone || "";
+    $("pfAddress").value = emp?.address || "";
+    $("pfBirthDate").value = emp?.birth_date || "";
+    $("pfKtp").value = emp?.ktp_number || "";
   }
 
   $("btnChangePw").onclick = async ()=>{
@@ -915,6 +951,62 @@
       alert(e.message || String(e));
     }
   };
+
+// ===============================
+// Change Password (SUDAH ADA)
+// ===============================
+$("btnChangePw").onclick = async ()=>{
+  show($("pwMsg"), false);
+  show($("pwProg"), true);
+  try{
+    await api.changePassword({
+      oldPw: $("pwOld").value,
+      newPw: $("pwNew").value
+    });
+    show($("pwProg"), false);
+    show($("pwMsg"), true);
+    $("pwMsg").className = "msg ok";
+    setText($("pwMsg"), "Password updated.");
+  }catch(e){
+    show($("pwProg"), false);
+    show($("pwMsg"), true);
+    $("pwMsg").className = "msg err";
+    setText($("pwMsg"), e.message || String(e));
+  }
+};
+
+  // ===============================
+  // D) EDIT PROFILE — TARUH DI SINI
+  // ===============================
+  $("btnSaveProfile").onclick = async ()=>{
+    show($("pfMsg"), false);
+    show($("pfProg"), true);
+    try{
+      const payload = {
+        phone: $("pfPhone").value.trim(),
+        address: $("pfAddress").value.trim(),
+        birth_date: $("pfBirthDate").value, // YYYY-MM-DD
+        ktp_number: $("pfKtp").value.trim(),
+      };
+  
+      await api.updateProfile(payload);
+  
+      // reload profile info
+      me = await api.me();
+      loadProfileBox();
+  
+      show($("pfProg"), false);
+      show($("pfMsg"), true);
+      $("pfMsg").className = "msg ok";
+      setText($("pfMsg"), "Profile updated.");
+    }catch(e){
+      show($("pfProg"), false);
+      show($("pfMsg"), true);
+      $("pfMsg").className = "msg err";
+      setText($("pfMsg"), e.message || String(e));
+    }
+  };
+
 
   async function loadAnnouncements(){
     show($("annErr"), false);

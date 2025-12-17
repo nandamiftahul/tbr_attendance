@@ -279,8 +279,57 @@ def api_me():
     return jsonify({
         "ok": True,
         "user": {"name": current_user.name, "email": current_user.email, "role": current_user.role},
-        "employee": ({"id": emp.id, "code": emp.code, "name": emp.name, "dept": emp.dept} if emp else None)
+        "employee": (
+            {
+                "id": emp.id,
+                "code": emp.code,
+                "name": emp.name,
+                "dept": emp.dept,
+                "phone": emp.phone or "",
+                "address": emp.address or "",
+                "birth_date": emp.birth_date.isoformat() if emp.birth_date else "",
+                "ktp_number": emp.ktp_number or "",
+            } if emp else None
+        )
     })
+
+@app.post("/api/profile/update")
+@login_required
+def api_profile_update():
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+
+    data = request.get_json(silent=True) or {}
+
+    phone = (data.get("phone") or "").strip()
+    address = (data.get("address") or "").strip()
+    ktp_number = (data.get("ktp_number") or "").strip()
+    birth_date_s = (data.get("birth_date") or "").strip()  # YYYY-MM-DD
+
+    # basic length guards (biar ga error DB)
+    if len(phone) > 30:
+        return jsonify({"ok": False, "error": "Phone too long"}), 400
+    if len(address) > 255:
+        return jsonify({"ok": False, "error": "Address too long"}), 400
+    if len(ktp_number) > 32:
+        return jsonify({"ok": False, "error": "KTP number too long"}), 400
+
+    bd = None
+    if birth_date_s:
+        try:
+            bd = datetime.strptime(birth_date_s, "%Y-%m-%d").date()
+        except Exception:
+            return jsonify({"ok": False, "error": "Invalid birth_date (YYYY-MM-DD)"}), 400
+
+    emp.phone = phone
+    emp.address = address
+    emp.ktp_number = ktp_number
+    emp.birth_date = bd
+
+    db.session.commit()
+    return jsonify({"ok": True, "message": "Profile updated"})
+
 
 @app.post("/api/attendance/check")
 @login_required

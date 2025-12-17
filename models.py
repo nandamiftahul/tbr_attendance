@@ -50,6 +50,10 @@ class Employee(db.Model):
     dept = db.Column(db.String(80))
     role = db.Column(db.String(20), default="staff")  # staff/manager/general_manager/hrd (UI)
     is_active = db.Column(db.Boolean, default=True)
+    phone = db.Column(db.String(30))
+    address = db.Column(db.String(255))
+    birth_date = db.Column(db.Date)
+    ktp_number = db.Column(db.String(32))
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     # so template can do r.user.email
