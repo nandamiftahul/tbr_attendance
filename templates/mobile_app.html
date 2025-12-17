@@ -242,6 +242,16 @@
         <div class="msg err" id="attErr" style="display:none"></div>
         <div class="muted" style="margin-top:6px;">Tip: izinkan lokasi (GPS) agar lat/lon terkirim.</div>
       </div>
+      <div style="height:12px"></div>
+      
+      <div class="card" id="annCard">
+        <div class="h2">Announcements</div>
+        <div class="progress" id="annProg" style="display:none"><div class="bar"></div></div>
+        <div class="msg err" id="annErr" style="display:none"></div>
+        <div id="annList" class="col" style="gap:10px;"></div>
+        <div class="muted" style="margin-top:8px;">Info dari admin (berita duka, libur, cuti bersama, dll).</div>
+      </div>
+
     </div>
 
     <!-- RECORDS -->
@@ -472,6 +482,7 @@
     approve(id){ return this.req(`/api/leave/${id}/approve`,{method:"POST"}); },
     reject(id){ return this.req(`/api/leave/${id}/reject`,{method:"POST"}); },
     changePassword(old_password, new_password){ return this.req("/api/profile/change_password",{method:"POST", body:{old_password, new_password}}); },
+    announcements(){ return this.req("/api/announcements/active"); },
   };
 
 
@@ -516,6 +527,7 @@
     if(key==="leave") loadMyLeave();
     if(key==="approval") loadApprovals();
     if(key==="profile") loadProfileBox();
+    if(key==="home") loadAnnouncements();
   }
 
   // ---------- login/bootstrap ----------
@@ -901,6 +913,50 @@
       alert(e.message || String(e));
     }
   };
+
+  async function loadAnnouncements(){
+    show($("annErr"), false);
+    show($("annProg"), true);
+    $("annList").innerHTML = "";
+    try{
+      const j = await api.announcements();
+      const rows = j.rows || [];
+      if(rows.length === 0){
+        $("annList").innerHTML = `<div class="muted">No announcements.</div>`;
+        show($("annProg"), false);
+        return;
+      }
+  
+      rows.forEach(a=>{
+        const lv = String(a.level||"info").toLowerCase();
+        const pill =
+          lv==="danger" ? `<span class="badge b-absent">IMPORTANT</span>` :
+          lv==="warning" ? `<span class="badge b-late">NOTICE</span>` :
+          `<span class="badge b-other">INFO</span>`;
+  
+        const el = document.createElement("div");
+        el.style.border = "1px solid rgba(255,255,255,.10)";
+        el.style.borderRadius = "14px";
+        el.style.padding = "12px";
+        el.style.background = "rgba(0,0,0,.18)";
+        el.innerHTML = `
+          <div class="line" style="margin-bottom:6px;">
+            <div style="font-weight:1000">${esc(a.title||"-")}</div>
+            <div style="margin-left:auto">${pill}</div>
+          </div>
+          <div style="color:rgba(255,255,255,.82)">${esc(a.body||"")}</div>
+        `;
+        $("annList").appendChild(el);
+      });
+  
+      show($("annProg"), false);
+    }catch(e){
+      show($("annProg"), false);
+      show($("annErr"), true);
+      setText($("annErr"), e.message || String(e));
+    }
+  }
+
 
   // init
   bootstrap();

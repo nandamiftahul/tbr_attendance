@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% block title %}Announcements · Attendance{% endblock %}
+{% block content %}
+<h1>Announcements</h1>
+
+<div class="card" style="margin-bottom:12px;">
+  <form method="post" action="{{ url_for('announcement_create') }}"
+        style="display:grid;grid-template-columns: 1fr 2fr 1fr;gap:10px;align-items:end;">
+    <div>
+      <label>Title</label>
+      <input name="title" placeholder="e.g., Libur Cuti Bersama" required>
+    </div>
+
+    <div>
+      <label>Body</label>
+      <input name="body" placeholder="Isi pengumuman singkat..." required>
+    </div>
+
+    <div>
+      <label>Level</label>
+      <select name="level">
+        <option value="info">Info</option>
+        <option value="warning">Warning</option>
+        <option value="danger">Danger</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Start (optional)</label>
+      <input type="datetime-local" name="start_at">
+    </div>
+
+    <div>
+      <label>End (optional)</label>
+      <input type="datetime-local" name="end_at">
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center;">
+      <label style="margin:0; display:flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="is_active" value="1" checked>
+        Active
+      </label>
+      <button class="btn" type="submit">Add</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Latest</h3>
+
+  {% if rows|length == 0 %}
+    <div class="muted">No announcements.</div>
+  {% else %}
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for a in rows %}
+      <div style="border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:12px;">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <strong>{{ a.title }}</strong>
+          <span class="badge" style="opacity:.85;">{{ (a.level or 'info')|upper }}</span>
+          {% if a.is_active %}
+            <span class="badge" style="background:rgba(0,255,0,.12);">ACTIVE</span>
+          {% else %}
+            <span class="badge" style="background:rgba(255,0,0,.12);">OFF</span>
+          {% endif %}
+          <span style="margin-left:auto; opacity:.75; font-size:12px;">
+            {{ a.created_at }}
+          </span>
+        </div>
+
+        <div style="margin-top:8px; opacity:.9;">{{ a.body }}</div>
+
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          <form method="post" action="{{ url_for('announcement_toggle', aid=a.id) }}">
+            <button class="btn secondary" type="submit">
+              {% if a.is_active %}Disable{% else %}Enable{% endif %}
+            </button>
+          </form>
+          <form method="post" action="{{ url_for('announcement_delete', aid=a.id) }}"
+                onsubmit="return confirm('Delete this announcement?');">
+            <button class="btn" style="background:#c0392b;" type="submit">Delete</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

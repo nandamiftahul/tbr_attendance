@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from sqlalchemy import or_
 
-from models import db, User, Employee, Attendance, LeaveRequest, Holiday, Shift, Office
+from models import db, User, Employee, Attendance, LeaveRequest, Holiday, Shift, Office, Announcement
 from flask import jsonify, Response
 from flask_login import login_required
 from werkzeug.security import generate_password_hash
@@ -506,6 +506,32 @@ def api_holidays():
         "ok": True,
         "rows": [{"date": h.date.isoformat(), "name": h.name} for h in rows]
     })
+
+
+@app.get("/api/announcements/active")
+@login_required
+def api_announcements_active():
+    now = datetime.utcnow()
+    q = Announcement.query.filter_by(is_active=True)
+
+    # jika start/end dipakai: aktif jika (start null or start<=now) and (end null or end>=now)
+    q = q.filter(
+        (Announcement.start_at.is_(None) | (Announcement.start_at <= now)),
+        (Announcement.end_at.is_(None) | (Announcement.end_at >= now)),
+    )
+
+    rows = q.order_by(Announcement.created_at.desc()).limit(10).all()
+
+    def to_row(a: Announcement):
+        return {
+            "id": a.id,
+            "title": a.title,
+            "body": a.body,
+            "level": (a.level or "info"),
+            "created_at": a.created_at.isoformat() if a.created_at else "",
+        }
+
+    return jsonify({"ok": True, "rows": [to_row(a) for a in rows]})
 
 
 # ---------------------------
@@ -1316,10 +1342,96 @@ def offices_admin():
     active = Office.query.filter_by(is_active=True).first()
     return render_template("office_admin.html", offices=offices, active=active)
 
+@app.get("/admin/announcements")
+@login_required
+def announcements_admin():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+
+    rows = Announcement.query.order_by(Announcement.created_at.desc()).all()
+    return render_template("announcements.html", rows=rows)
+
+
+@app.post("/admin/announcements/create")
+@login_required
+def announcement_create():
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+
+    title = (request.form.get("title") or "").strip()
+    body = (request.form.get("body") or "").strip()
+    level = (request.form.get("level") or "info").strip().lower()
+    is_active = (request.form.get("is_active") == "1")
+
+    # optional window
+    start_at_s = (request.form.get("start_at") or "").strip()  # "YYYY-MM-DDTHH:MM"
+    end_at_s = (request.form.get("end_at") or "").strip()
+
+    def parse_dt_local(s):
+        if not s:
+            return None
+        # input type=datetime-local -> "YYYY-MM-DDTHH:MM"
+        try:
+            return datetime.strptime(s, "%Y-%m-%dT%H:%M")
+        except Exception:
+            return None
+
+    start_at = parse_dt_local(start_at_s)
+    end_at = parse_dt_local(end_at_s)
+
+    if not title or not body:
+        flash("Title and body are required.", "danger")
+        return redirect(url_for("announcements_admin"))
+
+    if level not in ("info", "warning", "danger"):
+        level = "info"
+
+    a = Announcement(
+        title=title,
+        body=body,
+        level=level,
+        is_active=is_active,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    db.session.add(a)
+    db.session.commit()
+    flash("Announcement added", "success")
+    return redirect(url_for("announcements_admin"))
+
+
+@app.post("/admin/announcements/<int:aid>/toggle")
+@login_required
+def announcement_toggle(aid):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+
+    a = Announcement.query.get_or_404(aid)
+    a.is_active = not bool(a.is_active)
+    db.session.commit()
+    flash("Announcement updated", "success")
+    return redirect(url_for("announcements_admin"))
+
+
+@app.post("/admin/announcements/<int:aid>/delete")
+@login_required
+def announcement_delete(aid):
+    if current_user.role != "admin":
+        flash("Admins only", "warning")
+        return redirect(url_for("dashboard"))
+
+    a = Announcement.query.get_or_404(aid)
+    db.session.delete(a)
+    db.session.commit()
+    flash("Announcement deleted", "info")
+    return redirect(url_for("announcements_admin"))
+
 @app.get("/mobile")
 def mobile_web():
     return render_template("mobile_app.html")
-
 
 
 if __name__ == "__main__":

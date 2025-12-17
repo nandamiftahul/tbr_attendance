@@ -158,3 +158,23 @@ class Office(db.Model):
     lon = db.Column(db.Float, nullable=False)
     radius_m = db.Column(db.Integer, default=150)
     is_active = db.Column(db.Boolean, default=True)
+
+
+# --- Announcement / News ---
+class Announcement(db.Model):
+    __tablename__ = "announcements"
+    id = db.Column(db.Integer, primary_key=True)
+
+    title = db.Column(db.String(160), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+
+    # optional: info / warning / danger
+    level = db.Column(db.String(20), default="info")
+    is_active = db.Column(db.Boolean, default=True)
+
+    # show window (optional)
+    start_at = db.Column(db.DateTime, nullable=True)
+    end_at = db.Column(db.DateTime, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
