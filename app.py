@@ -354,7 +354,7 @@ def api_leave_request():
     except Exception:
         return jsonify({"ok": False, "error": "Invalid date format"}), 400
 
-    if req_type not in ("leave", "sick", "wfh", "on_site"):
+    if req_type not in ("leave", "sick", "wfh", "on_site","late_work","early_finish"):
         return jsonify({"ok": False, "error": "Invalid type"}), 400
 
     if end_date < start_date:

@@ -288,6 +288,8 @@
               <option value="sick">Sick</option>
               <option value="wfh">WFH</option>
               <option value="on_site">On Site Duty</option>
+              <option value="late_work">Late</option>
+              <option value="early_finish">Go home early</option>
             </select>
           </div>
 
@@ -678,7 +680,7 @@
     if(st==="present") return `<span class="badge b-present">PRESENT</span>`;
     if(st==="late") return `<span class="badge b-late">LATE</span>`;
     if(st==="absent") return `<span class="badge b-absent">ABSENT</span>`;
-    if(["leave","sick","wfh","on_site"].includes(st)) return `<span class="badge b-other">${st.toUpperCase()}</span>`;
+    if(["leave","sick","wfh","on_site","late_work","early_finish"].includes(st)) return `<span class="badge b-other">${st.toUpperCase()}</span>`;
     return "";
   }
 
