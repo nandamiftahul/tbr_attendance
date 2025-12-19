@@ -1,0 +1,150 @@
+[
+  {
+    "device_user_id": 1,
+    "employee_id": 27
+  },
+  {
+    "device_user_id": 2,
+    "employee_id": 32
+  },
+  {
+    "device_user_id": 3,
+    "employee_id": 38
+  },
+  {
+    "device_user_id": 8,
+    "employee_id": 24
+  },
+  {
+    "device_user_id": 10,
+    "employee_id": 31
+  },
+  {
+    "device_user_id": 12,
+    "employee_id": 25
+  },
+  {
+    "device_user_id": 16,
+    "employee_id": 6
+  },
+  {
+    "device_user_id": 17,
+    "employee_id": 5
+  },
+  {
+    "device_user_id": 20,
+    "employee_id": 42
+  },
+  {
+    "device_user_id": 23,
+    "employee_id": 15
+  },
+  {
+    "device_user_id": 24,
+    "employee_id": 45
+  },
+  {
+    "device_user_id": 26,
+    "employee_id": 44
+  },
+  {
+    "device_user_id": 28,
+    "employee_id": 12
+  },
+  {
+    "device_user_id": 32,
+    "employee_id": 39
+  },
+  {
+    "device_user_id": 34,
+    "employee_id": 1
+  },
+  {
+    "device_user_id": 40,
+    "employee_id": 10
+  },
+  {
+    "device_user_id": 41,
+    "employee_id": 19
+  },
+  {
+    "device_user_id": 43,
+    "employee_id": 2
+  },
+  {
+    "device_user_id": 44,
+    "employee_id": 28
+  },
+  {
+    "device_user_id": 53,
+    "employee_id": 11
+  },
+  {
+    "device_user_id": 54,
+    "employee_id": 33
+  },
+  {
+    "device_user_id": 59,
+    "employee_id": 26
+  },
+  {
+    "device_user_id": 67,
+    "employee_id": 41
+  },
+  {
+    "device_user_id": 71,
+    "employee_id": 13
+  },
+  {
+    "device_user_id": 75,
+    "employee_id": 46
+  },
+  {
+    "device_user_id": 79,
+    "employee_id": 43
+  },
+  {
+    "device_user_id": 80,
+    "employee_id": 17
+  },
+  {
+    "device_user_id": 82,
+    "employee_id": 36
+  },
+  {
+    "device_user_id": 84,
+    "employee_id": 35
+  },
+  {
+    "device_user_id": 102,
+    "employee_id": 40
+  },
+  {
+    "device_user_id": 104,
+    "employee_id": 23
+  },
+  {
+    "device_user_id": 105,
+    "employee_id": 18
+  },
+  {
+    "device_user_id": 106,
+    "employee_id": 29
+  },
+  {
+    "device_user_id": 108,
+    "employee_id": 30
+  },
+  {
+    "device_user_id": 111,
+    "employee_id": 16
+  },
+  {
+    "device_user_id": 112,
+    "employee_id": 34
+  },
+  {
+    "device_user_id": 114,
+    "employee_id": 14
+  }
+]

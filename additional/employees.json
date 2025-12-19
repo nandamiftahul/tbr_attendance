@@ -1,0 +1,236 @@
+[
+  {
+    "code": "NMK",
+    "employee_id": 1,
+    "is_active": true,
+    "name": "Nanda Miftahul Khoyri"
+  },
+  {
+    "code": "BGM",
+    "employee_id": 2,
+    "is_active": true,
+    "name": "Billy Glenn Momor"
+  },
+  {
+    "code": "DRA",
+    "employee_id": 3,
+    "is_active": true,
+    "name": "Danu Raditya"
+  },
+  {
+    "code": "LBH",
+    "employee_id": 5,
+    "is_active": true,
+    "name": "Listianto Budi Handayani"
+  },
+  {
+    "code": "MSP",
+    "employee_id": 6,
+    "is_active": true,
+    "name": "Muchtar Suhari Putra"
+  },
+  {
+    "code": "BSO",
+    "employee_id": 8,
+    "is_active": true,
+    "name": "Bambang Sudarsono"
+  },
+  {
+    "code": "BSN",
+    "employee_id": 10,
+    "is_active": true,
+    "name": "Bimo Setiawan"
+  },
+  {
+    "code": "NWO",
+    "employee_id": 11,
+    "is_active": true,
+    "name": "Nowo Wurianto"
+  },
+  {
+    "code": "AKW",
+    "employee_id": 12,
+    "is_active": true,
+    "name": "Arwig Krisna Wardhana"
+  },
+  {
+    "code": "NEP",
+    "employee_id": 13,
+    "is_active": true,
+    "name": "Nanda Elna Pratama"
+  },
+  {
+    "code": "WNA",
+    "employee_id": 14,
+    "is_active": true,
+    "name": "Wistika Nur Aisyah"
+  },
+  {
+    "code": "HRD",
+    "employee_id": 15,
+    "is_active": true,
+    "name": "Terrindo HRD"
+  },
+  {
+    "code": "UWI",
+    "employee_id": 16,
+    "is_active": true,
+    "name": "Untung Wahyudi"
+  },
+  {
+    "code": "THT",
+    "employee_id": 17,
+    "is_active": true,
+    "name": "Taufik Hidayat"
+  },
+  {
+    "code": "AMK",
+    "employee_id": 18,
+    "is_active": true,
+    "name": "Adrianus Meran Koban "
+  },
+  {
+    "code": "ASI",
+    "employee_id": 19,
+    "is_active": true,
+    "name": "Andriansah Syahwani"
+  },
+  {
+    "code": "ANS",
+    "employee_id": 23,
+    "is_active": true,
+    "name": "Annisa Syachrani"
+  },
+  {
+    "code": "ASA",
+    "employee_id": 24,
+    "is_active": true,
+    "name": "Asep Sundawa"
+  },
+  {
+    "code": "CSA",
+    "employee_id": 25,
+    "is_active": true,
+    "name": "Christine Silitonga"
+  },
+  {
+    "code": "DKA",
+    "employee_id": 26,
+    "is_active": true,
+    "name": "Dethy Kurnia "
+  },
+  {
+    "code": "DSA",
+    "employee_id": 27,
+    "is_active": true,
+    "name": "Dionysius Sayoga"
+  },
+  {
+    "code": "IDP",
+    "employee_id": 28,
+    "is_active": true,
+    "name": "Donni Prasetyo"
+  },
+  {
+    "code": "EKI",
+    "employee_id": 29,
+    "is_active": true,
+    "name": "Elsan Kurniadi"
+  },
+  {
+    "code": "FMA",
+    "employee_id": 30,
+    "is_active": true,
+    "name": "Fikri Maulana"
+  },
+  {
+    "code": "HPO",
+    "employee_id": 31,
+    "is_active": true,
+    "name": "Henry Priyono "
+  },
+  {
+    "code": "JAP",
+    "employee_id": 32,
+    "is_active": true,
+    "name": "Johannes Andri Prihantoro"
+  },
+  {
+    "code": "MSY",
+    "employee_id": 33,
+    "is_active": true,
+    "name": "Margareth Stevany"
+  },
+  {
+    "code": "MJA",
+    "employee_id": 34,
+    "is_active": true,
+    "name": "Mohamad Jolanda"
+  },
+  {
+    "code": "NWU",
+    "employee_id": 35,
+    "is_active": true,
+    "name": "Niezken Wahyu"
+  },
+  {
+    "code": "PMA",
+    "employee_id": 36,
+    "is_active": true,
+    "name": "Perdana Meisya"
+  },
+  {
+    "code": "PVY",
+    "employee_id": 38,
+    "is_active": true,
+    "name": "Prasti Vibrianty"
+  },
+  {
+    "code": "RSA",
+    "employee_id": 39,
+    "is_active": true,
+    "name": "Raviadi Saluntara"
+  },
+  {
+    "code": "RSI",
+    "employee_id": 40,
+    "is_active": true,
+    "name": "Reza Sofani"
+  },
+  {
+    "code": "RMH",
+    "employee_id": 41,
+    "is_active": true,
+    "name": "Rizki Mahmudah "
+  },
+  {
+    "code": "SGO",
+    "employee_id": 42,
+    "is_active": true,
+    "name": "Sugiyanto"
+  },
+  {
+    "code": "YKY",
+    "employee_id": 43,
+    "is_active": true,
+    "name": "Yohanna Kiky"
+  },
+  {
+    "code": "HDH",
+    "employee_id": 44,
+    "is_active": true,
+    "name": "Hardiansyah"
+  },
+  {
+    "code": "SRI",
+    "employee_id": 45,
+    "is_active": true,
+    "name": "Sri Handayati"
+  },
+  {
+    "code": "HSN",
+    "employee_id": 46,
+    "is_active": true,
+    "name": "Hasan"
+  }
+]
