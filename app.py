@@ -521,6 +521,19 @@ def api_attendance_my():
         } for r in rows]
     })
 
+@app.route("/api/employees", methods=["GET"])
+def api_employees():
+    employees = Employee.query.order_by(Employee.id).all()
+
+    return jsonify([
+        {
+            "employee_id": e.id,
+            "code": e.code,
+            "name": e.name,
+            "is_active": e.is_active
+        }
+        for e in employees
+    ])
 
 # --- API: holidays (for Records calendar) ---
 @app.get("/api/holidays")
