@@ -81,13 +81,13 @@
           <td>
             <div class="dt">{{ r.check_in_local_str }}</div>
             <div class="meta">IP: {{ r.check_in_ip or '' }}</div>
-            <div class="meta truncate" title="{{ r.check_in_ua or '' }}">UA: {{ r.check_in_ua or '' }}</div>
+            <div class="meta ua" title="{{ r.check_in_ua or '' }}">UA: {{ r.check_in_ua or '' }}</div>
           </td>
 
           <td>
             <div class="dt">{{ r.check_out_local_str }}</div>
             <div class="meta">IP: {{ r.check_out_ip or '' }}</div>
-            <div class="meta truncate" title="{{ r.check_out_ua or '' }}">UA: {{ r.check_out_ua or '' }}</div>
+            <div class="meta ua" title="{{ r.check_out_ua or '' }}">UA: {{ r.check_out_ua or '' }}</div>
           </td>
 
           <td>{{ '%.2f'|format(r.duration_hours) }}</td>
@@ -120,13 +120,21 @@
 
 .table-fixed th, .table-fixed td{
   vertical-align: top;
-  white-space: nowrap;
+  white-space: nowrap; /* default tetap nowrap */
 }
 
 /* allow some columns to wrap/fit */
-.col-ci, .col-co, .col-note{
+/* kolom yang memang perlu wrap agar kebaca */
+.col-ci, .col-co, .col-note { 
+  white-space: normal !important;
+  min-width: 320px;          /* sebelumnya 260, kita lebarkan */
+}
+
+/* UA dan meta boleh wrap + pecah kata panjang */
+.ua, .col-note .truncate, .meta{
   white-space: normal;
-  min-width: 260px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .col-name{ min-width: 180px; }
 .col-dept{ min-width: 140px; }
@@ -140,7 +148,7 @@
 
 /* truncate long text */
 .truncate{
-  max-width: 220px;
+  max-width: 260px;          /* naikin dari 220 biar lebih lega */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
