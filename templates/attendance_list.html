@@ -131,17 +131,28 @@
 }
 
 /* UA dan meta boleh wrap + pecah kata panjang */
-.ua, .col-note .truncate, .meta{
+/* perbesar kolom check-in/out */
+.col-ci, .col-co{
   white-space: normal;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  min-width: 380px;   /* dari 260 -> 380 */
 }
+
+/* note diperkecil */
+.col-note{
+  white-space: normal;
+  min-width: 160px;   /* dari 260 -> 160 */
+}
+
+/* kolom-kolom kecil */
+.col-date{ min-width: 95px; }    /* dari 110 */
+.col-code{ min-width: 60px; }    /* dari 80 */
+.col-hours{ min-width: 60px; }   /* dari 80 */
+.col-status{ min-width: 90px; }  /* dari 110 */
+
+/* kolom identitas biarin */
 .col-name{ min-width: 180px; }
 .col-dept{ min-width: 140px; }
-.col-date{ min-width: 110px; }
-.col-code{ min-width: 80px; }
-.col-hours{ min-width: 80px; }
-.col-status{ min-width: 110px; }
+
 
 .dt{ font-weight: 600; }
 .meta{ font-size: 12px; opacity: .9; }
