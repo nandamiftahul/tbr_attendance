@@ -522,6 +522,7 @@ def api_attendance_my():
     })
 
 @app.route("/api/employees", methods=["GET"])
+@login_required
 def api_employees():
     employees = Employee.query.order_by(Employee.id).all()
 
@@ -1490,6 +1491,104 @@ def announcement_delete(aid):
     db.session.commit()
     flash("Announcement deleted", "info")
     return redirect(url_for("announcements_admin"))
+
+
+@app.post("/api/admin/attendance/import")
+@login_required
+def api_admin_attendance_import():
+    # Admin only (pattern sama seperti /seed dan admin pages lain)
+    if (current_user.role or "").lower() != "admin":
+        return jsonify({"ok": False, "error": "Admins only"}), 403
+
+    overwrite = (request.args.get("overwrite") == "1") or (request.form.get("overwrite") == "1")
+
+    # Terima JSON dari:
+    # 1) multipart file upload: field name = "file"
+    # 2) raw JSON body: request.get_json()
+    rows = None
+
+    if "file" in request.files and request.files["file"]:
+        f = request.files["file"]
+        try:
+            rows = json.loads(f.read().decode("utf-8"))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Invalid JSON file: {e}"}), 400
+    else:
+        rows = request.get_json(silent=True)
+
+    if not isinstance(rows, list):
+        return jsonify({"ok": False, "error": "Payload must be a JSON array"}), 400
+
+    tz = ZoneInfo(TZ)  # pakai TZ app (sama kayak attendance_check_post / api_attendance_check)【:contentReference[oaicite:3]{index=3}】
+
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = []
+
+    def parse_date(s: str):
+        return datetime.strptime(s, "%Y-%m-%d").date()
+
+    def parse_dt(work_date: str, hhmmss: str):
+        return datetime.strptime(f"{work_date} {hhmmss}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz)
+
+    for idx, r in enumerate(rows):
+        try:
+            emp_id = int(r.get("employee_id"))
+            work_date = (r.get("work_date") or "").strip()
+            ci = (r.get("check_in") or "").strip()
+            co = (r.get("check_out") or "").strip()
+
+            # minimal required
+            if not work_date or not ci:
+                skipped += 1
+                continue
+
+            # Pastikan employee ada
+            emp = Employee.query.get(emp_id)
+            if not emp:
+                skipped += 1
+                continue
+
+            wd = parse_date(work_date)
+
+            rec = Attendance.query.filter_by(employee_id=emp_id, work_date=wd).first()
+            if not rec:
+                rec = Attendance(employee_id=emp_id, work_date=wd)
+                db.session.add(rec)
+                created += 1
+            else:
+                updated += 1
+
+            # isi check_in/out
+            if overwrite or rec.check_in is None:
+                rec.check_in = parse_dt(work_date, ci)
+            if co:
+                if overwrite or rec.check_out is None:
+                    rec.check_out = parse_dt(work_date, co)
+
+            # audit note (jaga pendek, kolom 255)【:contentReference[oaicite:4]{index=4}】
+            tag = f" ImportedJSON device_user_id={r.get('device_user_id')}."
+            base = rec.note or ""
+            if "ImportedJSON" not in base:
+                rec.note = (base + tag).strip()[:255]
+
+            rec.status = rec.status or "present"
+
+        except Exception as e:
+            skipped += 1
+            errors.append({"row": idx, "error": str(e)})
+
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors[:20],  # batasi biar ga kegedean
+    })
+
 
 @app.get("/mobile")
 def mobile_web():

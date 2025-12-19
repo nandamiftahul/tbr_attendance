@@ -30,6 +30,31 @@
 </div>
 
 <div class="card" style="margin-top:12px;">
+  <h2 style="margin-bottom:10px;">Import Attendance (JSON)</h2>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+    <div style="min-width:260px;">
+      <label>JSON File</label>
+      <input id="attImportFile" type="file" accept="application/json">
+    </div>
+
+    <label style="display:flex; gap:8px; align-items:center; margin:0;">
+      <input id="attImportOverwrite" type="checkbox">
+      Overwrite existing check_in / check_out
+    </label>
+
+    <button class="btn" type="button" onclick="uploadAttendanceJson()">
+      Upload JSON
+    </button>
+  </div>
+
+  <div id="attImportResult"
+       style="margin-top:10px; font-size:13px; opacity:.9;">
+  </div>
+</div>
+
+
+<div class="card" style="margin-top:12px;">
   <div class="tablewrap">
     <table class="table table-fixed">
       <thead>
@@ -124,5 +149,45 @@
 /* ensure text contrast (in case base theme makes it faint) */
 .table-fixed td, .table-fixed th { color: rgba(255,255,255,0.92); }
 </style>
+
+<script>
+async function uploadAttendanceJson(){
+  const fileEl = document.getElementById("attImportFile");
+  const overwrite = document.getElementById("attImportOverwrite").checked;
+  const out = document.getElementById("attImportResult");
+
+  out.textContent = "";
+
+  if(!fileEl.files || !fileEl.files[0]){
+    out.textContent = "Pilih file JSON dulu.";
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append("file", fileEl.files[0]);
+
+  out.textContent = "Uploading...";
+
+  try{
+    const url = "/api/admin/attendance/import" + (overwrite ? "?overwrite=1" : "");
+    const res = await fetch(url, { method: "POST", body: fd });
+    const j = await res.json();
+
+    if(!res.ok || !j.ok){
+      out.textContent = "Gagal: " + (j.error || ("HTTP " + res.status));
+      return;
+    }
+
+    out.textContent =
+      `Sukses ✔ created=${j.created}, updated=${j.updated}, skipped=${j.skipped}`;
+
+    setTimeout(()=>location.reload(), 800);
+
+  }catch(e){
+    out.textContent = "Error: " + e;
+  }
+}
+</script>
+
 
 {% endblock %}
