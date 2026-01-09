@@ -28,11 +28,13 @@ from PIL import Image
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 # optional: kalau dependency tersedia
+# --- Face Engine: OpenCV (Headless) ---
 try:
-    import face_recognition
+    import cv2
 except Exception as e:
-    face_recognition = None
-    FACE_IMPORT_ERROR = str(e)
+    cv2 = None
+    OPENCV_IMPORT_ERROR = str(e)
+
 
 
 
@@ -53,6 +55,8 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 FACE_ENABLED = os.getenv("FACE_ENABLED", "0") == "1"
 FACE_TOLERANCE = float(os.getenv("FACE_TOLERANCE", "0.48"))  # 0.45-0.55 umum
 FACE_TOKEN_TTL_SEC = int(os.getenv("FACE_TOKEN_TTL_SEC", "90"))
+FACE_LBPH_THRESHOLD = float(os.getenv("FACE_LBPH_THRESHOLD", "65"))  # lebih kecil = lebih ketat
+
 
 serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="face-token-v1")
 
@@ -129,20 +133,38 @@ def to_local_iso(dt):
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
     return dt.astimezone(tz).isoformat()
 
-def _b64_to_rgb_image(b64_data: str) -> np.ndarray:
-    """
-    b64_data: dataURL 'data:image/jpeg;base64,...' atau base64 murni
-    return: RGB numpy array
-    """
+def _b64_to_bgr_image(b64_data: str) -> np.ndarray:
     if not b64_data:
         raise ValueError("Image is required")
     s = b64_data.strip()
     if "," in s and s.lower().startswith("data:image"):
         s = s.split(",", 1)[1]
     raw = base64.b64decode(s)
-    img = Image.open(io.BytesIO(raw)).convert("RGB")
-    return np.array(img)
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Failed to decode image")
+    return img  # BGR
 
+def _extract_face_gray(bgr: np.ndarray) -> np.ndarray:
+    """Return 200x200 grayscale face crop, raise if 0 or multi face."""
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+
+    # Haar cascade included in opencv-python packages
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    if face_cascade.empty():
+        raise ValueError("Failed to load haarcascade_frontalface_default.xml")
+
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+    if len(faces) != 1:
+        raise ValueError("Please capture exactly 1 face (not 0 / not multiple).")
+
+    (x, y, w, h) = faces[0]
+    face = gray[y:y+h, x:x+w]
+    face = cv2.resize(face, (200, 200), interpolation=cv2.INTER_AREA)
+    face = cv2.equalizeHist(face)
+    return face
 
 # ✅ helper create/link user
 def create_user_for_employee(emp: Employee, login_email: str, password: str, role: str = "staff"):
@@ -379,7 +401,7 @@ def api_attendance_check():
     lon = data.get("lon")
 
     # ✅ FACE gate
-    if FACE_ENABLED and face_recognition is None:
+    if FACE_ENABLED:
         face_token = (data.get("face_token") or "").strip()
         if not face_token:
             return jsonify({"ok": False, "error": "Face verification required"}), 403
@@ -393,6 +415,7 @@ def api_attendance_check():
             return jsonify({"ok": False, "error": "Face token expired, please retry"}), 403
         except BadSignature:
             return jsonify({"ok": False, "error": "Invalid face token"}), 403
+
 
     lat = float(lat) if lat is not None else None
     lon = float(lon) if lon is not None else None
@@ -1643,110 +1666,101 @@ def api_admin_attendance_import():
 @app.post("/api/face/enroll")
 @login_required
 def api_face_enroll():
-    """
-    Body: { image: "data:image/jpeg;base64,...." }
-    Menyimpan embedding wajah ke Employee yang terkait current_user.
-    """
-    if face_recognition is None:
-        return jsonify({
-            "ok": False,
-            "error": "Face engine not available on server",
-            "detail": FACE_IMPORT_ERROR
-        }), 501
+    if cv2 is None:
+        return jsonify({"ok": False, "error": "OpenCV not available on server", "detail": OPENCV_IMPORT_ERROR}), 501
+
     emp = _employee_for_user(current_user)
     if not emp:
         return jsonify({"ok": False, "error": "No employee linked"}), 400
 
     data = request.get_json(silent=True) or {}
     img_b64 = data.get("image")
-
     if not img_b64:
         return jsonify({"ok": False, "error": "Image required"}), 400
 
     try:
-        rgb = _b64_to_rgb_image(img_b64)
+        bgr = _b64_to_bgr_image(img_b64)
+        face = _extract_face_gray(bgr)
 
-        # detect face & encoding
-        locs = face_recognition.face_locations(rgb, model="hog")
-        if len(locs) != 1:
-            return jsonify({"ok": False, "error": "Please capture exactly 1 face (not 0 / not multiple)."}), 400
+        if not hasattr(cv2, "face"):
+            return jsonify({"ok": False, "error": "cv2.face not found. Install opencv-contrib-python-headless"}), 501
 
-        enc = face_recognition.face_encodings(rgb, known_face_locations=locs)
-        if not enc:
-            return jsonify({"ok": False, "error": "Failed to extract face features"}), 400
+        rec = cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8)
+        # Train with 1 sample (label=1). Bisa ditingkatkan nanti dengan multi-sample.
+        rec.train([face], np.array([1], dtype=np.int32))
 
-        emb = np.asarray(enc[0], dtype=np.float32)  # (128,)
-        emp.face_embedding = emb.tobytes()
+        # Save to temp yml and store bytes in DB
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:
+            tmp_path = tf.name
+        rec.write(tmp_path)
+        with open(tmp_path, "rb") as f:
+            model_bytes = f.read()
+        os.remove(tmp_path)
+
+        emp.face_embedding = model_bytes
         emp.face_updated_at = datetime.utcnow()
         db.session.commit()
 
         return jsonify({"ok": True, "message": "Face enrolled"}), 200
+
     except Exception as e:
         return jsonify({"ok": False, "error": f"Enroll failed: {e}"}), 400
 
 @app.post("/api/face/verify")
 @login_required
 def api_face_verify():
-    """
-    Body: { image: "...", action: "check_in"|"check_out" }
-    Return: { ok:true, token:"..." }
-    """
-    if face_recognition is None:
-        return jsonify({
-            "ok": False,
-            "error": "Face engine not available on server",
-            "detail": FACE_IMPORT_ERROR
-        }), 501
-    
+    if cv2 is None:
+        return jsonify({"ok": False, "error": "OpenCV not available on server", "detail": OPENCV_IMPORT_ERROR}), 501
+
+    data = request.get_json(silent=True) or {}
+    action = (data.get("action") or "").strip()
+
+    # kalau FACE_ENABLED=0, tetap keluarkan token (bypass)
     if not FACE_ENABLED:
-        data = request.get_json(silent=True) or {}
-        action = (data.get("action") or "").strip()
         tok = serializer.dumps({"uid": int(current_user.id), "action": action, "ts": int(datetime.utcnow().timestamp())})
         return jsonify({"ok": True, "token": tok})
-    
+
     emp = _employee_for_user(current_user)
     if not emp:
         return jsonify({"ok": False, "error": "No employee linked"}), 400
     if not emp.face_embedding:
         return jsonify({"ok": False, "error": "Face not enrolled yet"}), 400
 
-    data = request.get_json(silent=True) or {}
     img_b64 = data.get("image")
-    action = (data.get("action") or "").strip()
-
+    if not img_b64:
+        return jsonify({"ok": False, "error": "Image required"}), 400
     if action not in ("check_in", "check_out"):
         return jsonify({"ok": False, "error": "Invalid action"}), 400
+    if not hasattr(cv2, "face"):
+        return jsonify({"ok": False, "error": "cv2.face not found. Install opencv-contrib-python-headless"}), 501
 
     try:
-        rgb = _b64_to_rgb_image(img_b64)
+        bgr = _b64_to_bgr_image(img_b64)
+        face = _extract_face_gray(bgr)
 
-        locs = face_recognition.face_locations(rgb, model="hog")
-        if len(locs) != 1:
-            return jsonify({"ok": False, "error": "Please capture exactly 1 face"}), 400
+        # Load recognizer from bytes
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as tf:
+            tmp_path = tf.name
+            tf.write(emp.face_embedding)
+        rec = cv2.face.LBPHFaceRecognizer_create()
+        rec.read(tmp_path)
+        os.remove(tmp_path)
 
-        enc = face_recognition.face_encodings(rgb, known_face_locations=locs)
-        if not enc:
-            return jsonify({"ok": False, "error": "Failed to extract face features"}), 400
-
-        probe = np.asarray(enc[0], dtype=np.float32)
-
-        known = np.frombuffer(emp.face_embedding, dtype=np.float32)
-        if known.shape[0] != 128:
-            return jsonify({"ok": False, "error": "Invalid stored face template"}), 400
-
-        dist = float(np.linalg.norm(known - probe))
-        if dist > FACE_TOLERANCE:
-            return jsonify({"ok": False, "error": f"Face not match (dist={dist:.3f})"}), 403
+        label, confidence = rec.predict(face)  # confidence: smaller = better
+        if int(label) != 1 or float(confidence) > FACE_LBPH_THRESHOLD:
+            return jsonify({"ok": False, "error": f"Face not match (conf={confidence:.2f})"}), 403
 
         tok = serializer.dumps({
             "uid": int(current_user.id),
             "action": action,
             "ts": int(datetime.utcnow().timestamp()),
         })
-        return jsonify({"ok": True, "token": tok, "dist": dist})
+        return jsonify({"ok": True, "token": tok, "confidence": float(confidence)})
+
     except Exception as e:
         return jsonify({"ok": False, "error": f"Verify failed: {e}"}), 400
-
 
 @app.get("/mobile")
 def mobile_web():
