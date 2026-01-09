@@ -28,7 +28,12 @@ from PIL import Image
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 # optional: kalau dependency tersedia
-import face_recognition
+try:
+    import face_recognition
+except Exception as e:
+    face_recognition = None
+    FACE_IMPORT_ERROR = str(e)
+
 
 
 GOOGLE_ENABLED = False
@@ -374,7 +379,7 @@ def api_attendance_check():
     lon = data.get("lon")
 
     # ✅ FACE gate
-    if FACE_ENABLED:
+    if FACE_ENABLED and face_recognition is None:
         face_token = (data.get("face_token") or "").strip()
         if not face_token:
             return jsonify({"ok": False, "error": "Face verification required"}), 403
@@ -1642,6 +1647,12 @@ def api_face_enroll():
     Body: { image: "data:image/jpeg;base64,...." }
     Menyimpan embedding wajah ke Employee yang terkait current_user.
     """
+    if face_recognition is None:
+        return jsonify({
+            "ok": False,
+            "error": "Face engine not available on server",
+            "detail": FACE_IMPORT_ERROR
+        }), 501
     emp = _employee_for_user(current_user)
     if not emp:
         return jsonify({"ok": False, "error": "No employee linked"}), 400
@@ -1680,6 +1691,13 @@ def api_face_verify():
     Body: { image: "...", action: "check_in"|"check_out" }
     Return: { ok:true, token:"..." }
     """
+    if face_recognition is None:
+        return jsonify({
+            "ok": False,
+            "error": "Face engine not available on server",
+            "detail": FACE_IMPORT_ERROR
+        }), 501
+    
     if not FACE_ENABLED:
         data = request.get_json(silent=True) or {}
         action = (data.get("action") or "").strip()
