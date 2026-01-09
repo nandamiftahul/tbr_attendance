@@ -1,0 +1,10 @@
+[phases.setup]
+aptPkgs = [
+  "libx11-6",
+  "libxext6",
+  "libsm6",
+  "libglib2.0-0",
+  "libstdc++6",
+  "cmake",
+  "build-essential"
+]
