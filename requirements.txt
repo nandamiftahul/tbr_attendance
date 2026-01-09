@@ -1,3 +1,5 @@
+setuptools 
+wheel
 Authlib
 Flask
 gunicorn
@@ -7,5 +9,7 @@ python-dotenv
 Werkzeug
 openpyxl
 psycopg2-binary
-
+face-recognition
+Pillow
+itsdangerous
 

@@ -21,6 +21,16 @@ from flask import jsonify, Response
 from flask_login import login_required
 from werkzeug.security import generate_password_hash
 
+# app.py
+import base64
+import numpy as np
+from PIL import Image
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
+# optional: kalau dependency tersedia
+import face_recognition
+
+
 GOOGLE_ENABLED = False
 try:
     from authlib.integrations.flask_client import OAuth
@@ -34,6 +44,12 @@ app = Flask(__name__, instance_relative_config=True)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///app.sqlite")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+FACE_ENABLED = os.getenv("FACE_ENABLED", "0") == "1"
+FACE_TOLERANCE = float(os.getenv("FACE_TOLERANCE", "0.48"))  # 0.45-0.55 umum
+FACE_TOKEN_TTL_SEC = int(os.getenv("FACE_TOKEN_TTL_SEC", "90"))
+
+serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="face-token-v1")
 
 os.makedirs(app.instance_path, exist_ok=True)
 
@@ -107,6 +123,20 @@ def to_local_iso(dt):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
     return dt.astimezone(tz).isoformat()
+
+def _b64_to_rgb_image(b64_data: str) -> np.ndarray:
+    """
+    b64_data: dataURL 'data:image/jpeg;base64,...' atau base64 murni
+    return: RGB numpy array
+    """
+    if not b64_data:
+        raise ValueError("Image is required")
+    s = b64_data.strip()
+    if "," in s and s.lower().startswith("data:image"):
+        s = s.split(",", 1)[1]
+    raw = base64.b64decode(s)
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    return np.array(img)
 
 
 # ✅ helper create/link user
@@ -331,7 +361,6 @@ def api_profile_update():
     db.session.commit()
     return jsonify({"ok": True, "message": "Profile updated"})
 
-
 @app.post("/api/attendance/check")
 @login_required
 def api_attendance_check():
@@ -343,6 +372,22 @@ def api_attendance_check():
     action = data.get("action")  # check_in/check_out
     lat = data.get("lat")
     lon = data.get("lon")
+
+    # ✅ FACE gate
+    if FACE_ENABLED:
+        face_token = (data.get("face_token") or "").strip()
+        if not face_token:
+            return jsonify({"ok": False, "error": "Face verification required"}), 403
+        try:
+            payload = serializer.loads(face_token, max_age=FACE_TOKEN_TTL_SEC)
+            if int(payload.get("uid", -1)) != int(current_user.id):
+                return jsonify({"ok": False, "error": "Invalid face token (uid mismatch)"}), 403
+            if payload.get("action") != action:
+                return jsonify({"ok": False, "error": "Invalid face token (action mismatch)"}), 403
+        except SignatureExpired:
+            return jsonify({"ok": False, "error": "Face token expired, please retry"}), 403
+        except BadSignature:
+            return jsonify({"ok": False, "error": "Invalid face token"}), 403
 
     lat = float(lat) if lat is not None else None
     lon = float(lon) if lon is not None else None
@@ -1590,6 +1635,100 @@ def api_admin_attendance_import():
         "errors": errors[:20],  # batasi biar ga kegedean
     })
 
+@app.post("/api/face/enroll")
+@login_required
+def api_face_enroll():
+    """
+    Body: { image: "data:image/jpeg;base64,...." }
+    Menyimpan embedding wajah ke Employee yang terkait current_user.
+    """
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+
+    data = request.get_json(silent=True) or {}
+    img_b64 = data.get("image")
+
+    if not img_b64:
+        return jsonify({"ok": False, "error": "Image required"}), 400
+
+    try:
+        rgb = _b64_to_rgb_image(img_b64)
+
+        # detect face & encoding
+        locs = face_recognition.face_locations(rgb, model="hog")
+        if len(locs) != 1:
+            return jsonify({"ok": False, "error": "Please capture exactly 1 face (not 0 / not multiple)."}), 400
+
+        enc = face_recognition.face_encodings(rgb, known_face_locations=locs)
+        if not enc:
+            return jsonify({"ok": False, "error": "Failed to extract face features"}), 400
+
+        emb = np.asarray(enc[0], dtype=np.float32)  # (128,)
+        emp.face_embedding = emb.tobytes()
+        emp.face_updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({"ok": True, "message": "Face enrolled"}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Enroll failed: {e}"}), 400
+
+@app.post("/api/face/verify")
+@login_required
+def api_face_verify():
+    """
+    Body: { image: "...", action: "check_in"|"check_out" }
+    Return: { ok:true, token:"..." }
+    """
+    if not FACE_ENABLED:
+        data = request.get_json(silent=True) or {}
+        action = (data.get("action") or "").strip()
+        tok = serializer.dumps({"uid": int(current_user.id), "action": action, "ts": int(datetime.utcnow().timestamp())})
+        return jsonify({"ok": True, "token": tok})
+    
+    emp = _employee_for_user(current_user)
+    if not emp:
+        return jsonify({"ok": False, "error": "No employee linked"}), 400
+    if not emp.face_embedding:
+        return jsonify({"ok": False, "error": "Face not enrolled yet"}), 400
+
+    data = request.get_json(silent=True) or {}
+    img_b64 = data.get("image")
+    action = (data.get("action") or "").strip()
+
+    if action not in ("check_in", "check_out"):
+        return jsonify({"ok": False, "error": "Invalid action"}), 400
+
+    try:
+        rgb = _b64_to_rgb_image(img_b64)
+
+        locs = face_recognition.face_locations(rgb, model="hog")
+        if len(locs) != 1:
+            return jsonify({"ok": False, "error": "Please capture exactly 1 face"}), 400
+
+        enc = face_recognition.face_encodings(rgb, known_face_locations=locs)
+        if not enc:
+            return jsonify({"ok": False, "error": "Failed to extract face features"}), 400
+
+        probe = np.asarray(enc[0], dtype=np.float32)
+
+        known = np.frombuffer(emp.face_embedding, dtype=np.float32)
+        if known.shape[0] != 128:
+            return jsonify({"ok": False, "error": "Invalid stored face template"}), 400
+
+        dist = float(np.linalg.norm(known - probe))
+        if dist > FACE_TOLERANCE:
+            return jsonify({"ok": False, "error": f"Face not match (dist={dist:.3f})"}), 403
+
+        tok = serializer.dumps({
+            "uid": int(current_user.id),
+            "action": action,
+            "ts": int(datetime.utcnow().timestamp()),
+        })
+        return jsonify({"ok": True, "token": tok, "dist": dist})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Verify failed: {e}"}), 400
+
 
 @app.get("/mobile")
 def mobile_web():
@@ -1599,4 +1738,4 @@ def mobile_web():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=8080)

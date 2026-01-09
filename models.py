@@ -61,6 +61,9 @@ class Employee(db.Model):
 
     shift_id = db.Column(db.Integer, db.ForeignKey("shifts.id"))
     shift = db.relationship("Shift", backref="employees")
+    # --- Face Recognition ---
+    face_embedding = db.Column(db.LargeBinary)  # store numpy float32 bytes
+    face_updated_at = db.Column(db.DateTime)
 
 
 class Holiday(db.Model):

@@ -343,6 +343,16 @@
       <div style="height:14px"></div>
 
       <div class="card">
+        <div class="h2" style="font-size:16px;">Face Enrollment</div>
+        <div class="muted">Daftarkan wajah 1x agar bisa check-in/out dengan verifikasi.</div>
+        <div style="height:10px"></div>
+        <button class="btn" id="btnEnrollFace">Enroll Face</button>
+        <div class="progress" id="enProg" style="display:none"><div class="bar"></div></div>
+        <div class="msg" id="enMsg" style="display:none"></div>
+      </div>
+      
+      <div style="height:14px"></div>
+      <div class="card">
         <div class="h2" style="font-size:16px;">Change Password</div>
         <div class="col">
           <div>
@@ -516,6 +526,8 @@
     changePassword(old_password, new_password){ return this.req("/api/profile/change_password",{method:"POST", body:{old_password, new_password}}); },
     announcements(){ return this.req("/api/announcements/active"); },
     updateProfile(payload){ return this.req("/api/profile/update",{method:"POST", body: payload}); },
+    faceEnroll(image){ return this.req("/api/face/enroll",{method:"POST", body:{image}}); },
+    faceVerify(image, action){ return this.req("/api/face/verify",{method:"POST", body:{image, action}}); },
   };
 
 
@@ -648,27 +660,148 @@
       );
     });
   }
-  async function doCheck(action){
-    show($("attOk"), false);
-    show($("attErr"), false);
-    show($("attProg"), true);
-    try{
-      const pos = await getPos();
-      const j = await api.checkAttendance(action, pos?.lat, pos?.lon);
-      const raw = String(j.time || "");
-      const dt = raw ? new Date(raw) : null;
-      const shown = dt ? dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,'0')+"-"+String(dt.getDate()).padStart(2,'0')
-          +" "+String(dt.getHours()).padStart(2,'0')+":"+String(dt.getMinutes()).padStart(2,'0')+":"+String(dt.getSeconds()).padStart(2,'0')
-          : "";
-      show($("attProg"), false);
-      show($("attOk"), true);
-      setText($("attOk"), (j.message||"OK") + (shown?(" · "+shown):""));
-    }catch(e){
-      show($("attProg"), false);
-      show($("attErr"), true);
-      setText($("attErr"), e.message || String(e));
+
+  let faceStream = null;
+  
+  async function openFaceModal(hintText){
+    $("faceErr").style.display = "none";
+    $("faceProg").style.display = "none";
+    $("faceHint").textContent = hintText || "Pastikan wajah terlihat jelas.";
+    $("faceModal").classList.add("show");
+  
+    const v = $("faceVideo");
+    // prefer front camera
+    faceStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 720 } },
+      audio: false
+    });
+    v.srcObject = faceStream;
+    await v.play();
+  }
+  
+  function closeFaceModal(){
+    $("faceModal").classList.remove("show");
+    const v = $("faceVideo");
+    if(v) v.srcObject = null;
+    if(faceStream){
+      faceStream.getTracks().forEach(t=>t.stop());
+      faceStream = null;
     }
   }
+  
+  function captureFaceJpegBase64(){
+    const v = $("faceVideo");
+    const c = $("faceCanvas");
+    const w = v.videoWidth || 720;
+    const h = v.videoHeight || 720;
+  
+    // crop center square biar wajah lebih konsisten
+    const side = Math.min(w,h);
+    const sx = Math.floor((w - side)/2);
+    const sy = Math.floor((h - side)/2);
+  
+    c.width = 480; c.height = 480;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(v, sx, sy, side, side, 0, 0, c.width, c.height);
+  
+    return c.toDataURL("image/jpeg", 0.85);
+  }
+
+ // ✅ Face Enrollment button (Profile)
+$("btnEnrollFace").onclick = async ()=>{
+  show($("enMsg"), false);
+  show($("enProg"), true);
+
+  try{
+    await openFaceModal("Arahkan wajah ke kamera lalu tekan Capture untuk enroll.");
+
+    await new Promise((resolve, reject)=>{
+      $("faceCancel").onclick = ()=>{ closeFaceModal(); reject(new Error("Cancelled")); };
+      $("faceCapture").onclick = async ()=>{
+        try{
+          show($("faceErr"), false);
+          show($("faceProg"), true);
+
+          const img = captureFaceJpegBase64();
+          await api.faceEnroll(img);
+
+          show($("faceProg"), false);
+          closeFaceModal();
+          resolve();
+        }catch(e){
+          show($("faceProg"), false);
+          show($("faceErr"), true);
+          setText($("faceErr"), e.message || String(e));
+        }
+      };
+    });
+
+    show($("enProg"), false);
+    show($("enMsg"), true);
+    $("enMsg").className = "msg ok";
+    setText($("enMsg"), "Face enrolled successfully.");
+  }catch(e){
+    show($("enProg"), false);
+    show($("enMsg"), true);
+    $("enMsg").className = "msg err";
+    setText($("enMsg"), e.message || String(e));
+  }
+};
+ 
+
+async function doCheck(action){
+  show($("attOk"), false);
+  show($("attErr"), false);
+  show($("attProg"), true);
+
+  try{
+    // 1) ambil lokasi dulu (optional)
+    const pos = await getPos();
+
+    // 2) Face verify
+    await openFaceModal(action==="check_in" ? "Verifikasi wajah untuk Check In" : "Verifikasi wajah untuk Check Out");
+
+    const token = await new Promise((resolve, reject)=>{
+      $("faceCancel").onclick = ()=>{ closeFaceModal(); reject(new Error("Cancelled")); };
+      $("faceCapture").onclick = async ()=>{
+        try{
+          show($("faceErr"), false);
+          show($("faceProg"), true);
+          const img = captureFaceJpegBase64();
+          const vj = await api.faceVerify(img, action);
+          show($("faceProg"), false);
+          closeFaceModal();
+          resolve(vj.token);
+        }catch(e){
+          show($("faceProg"), false);
+          show($("faceErr"), true);
+          setText($("faceErr"), e.message || String(e));
+        }
+      };
+    });
+
+    // 3) attendance check dengan face_token
+    const j = await api.req("/api/attendance/check", {
+      method:"POST",
+      body:{ action, lat: pos?.lat, lon: pos?.lon, face_token: token }
+    });
+
+    const raw = String(j.time || "");
+    const dt = raw ? new Date(raw) : null;
+    const shown = dt ? dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,'0')+"-"+String(dt.getDate()).padStart(2,'0')
+        +" "+String(dt.getHours()).padStart(2,'0')+":"+String(dt.getMinutes()).padStart(2,'0')+":"+String(dt.getSeconds()).padStart(2,'0')
+        : "";
+
+    show($("attProg"), false);
+    show($("attOk"), true);
+    setText($("attOk"), (j.message||"OK") + (shown?(" · "+shown):""));
+  }catch(e){
+    show($("attProg"), false);
+    show($("attErr"), true);
+    setText($("attErr"), e.message || String(e));
+  }
+}
+
   $("btnCheckIn").onclick = ()=> doCheck("check_in");
   $("btnCheckOut").onclick = ()=> doCheck("check_out");
 
@@ -952,29 +1085,6 @@
     }
   };
 
-// ===============================
-// Change Password (SUDAH ADA)
-// ===============================
-$("btnChangePw").onclick = async ()=>{
-  show($("pwMsg"), false);
-  show($("pwProg"), true);
-  try{
-    await api.changePassword({
-      oldPw: $("pwOld").value,
-      newPw: $("pwNew").value
-    });
-    show($("pwProg"), false);
-    show($("pwMsg"), true);
-    $("pwMsg").className = "msg ok";
-    setText($("pwMsg"), "Password updated.");
-  }catch(e){
-    show($("pwProg"), false);
-    show($("pwMsg"), true);
-    $("pwMsg").className = "msg err";
-    setText($("pwMsg"), e.message || String(e));
-  }
-};
-
   // ===============================
   // D) EDIT PROFILE — TARUH DI SINI
   // ===============================
@@ -1055,6 +1165,28 @@ $("btnChangePw").onclick = async ()=>{
   // init
   bootstrap();
 </script>
+
+<!-- Face Camera Modal -->
+<div class="modal" id="faceModal">
+  <div class="dialog" style="max-width:420px;">
+    <h3>Face Verification</h3>
+    <div class="muted" id="faceHint">Pastikan wajah terlihat jelas.</div>
+
+    <div style="margin-top:10px; border:1px solid rgba(255,255,255,.12); border-radius:14px; overflow:hidden;">
+      <video id="faceVideo" autoplay playsinline style="width:100%; display:block; background:#000;"></video>
+      <canvas id="faceCanvas" style="display:none;"></canvas>
+    </div>
+
+    <div class="row" style="margin-top:12px;">
+      <button class="btn outline small" id="faceCancel">Cancel</button>
+      <button class="btn small" id="faceCapture">Capture</button>
+    </div>
+
+    <div class="progress" id="faceProg" style="display:none"><div class="bar"></div></div>
+    <div class="msg err" id="faceErr" style="display:none"></div>
+  </div>
+</div>
+
 
 </body>
 </html>
