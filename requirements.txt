@@ -9,7 +9,7 @@ python-dotenv
 Werkzeug
 openpyxl
 psycopg2-binary
-face-recognition
+face_recognition
 Pillow
 itsdangerous
 
